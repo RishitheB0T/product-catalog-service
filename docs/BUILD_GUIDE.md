@@ -102,3 +102,36 @@ README.md ──links──► docs/PROGRESS.md ──"next action"──► doc
 docs/BUILD_GUIDE.md  ◄── updated every phase ──►  docs/FILE_GUIDE.md (one row per tracked file)
 .gitignore + .gitattributes ──► decide what enters every future commit, and with which line endings
 ```
+
+<!-- BUILD FLOW 01.05.03 — Between Phases 01 and 02: connecting GitHub -->
+## Between Phases 01 and 02 — Connecting GitHub
+
+**What we had before.** One commit (`5be2fc3`) that existed only on this laptop.
+
+**What we add.** A public GitHub repository, the `origin` remote, and one rule: every commit is pushed and verified right after it is made. No new files: the rule was added to
+`PROJECT_PLAN.md` §12.
+
+**Why.** The history should be visible on GitHub as it grows, and CI (Phase 14) runs there.
+
+**Commands we ran** (PowerShell)
+
+| Command | What it did |
+|---|---|
+| `winget install --id GitHub.cli -e --source winget` | Installed GitHub CLI 2.102.0. winget verified the installer's hash before running it |
+| `gh auth login --hostname github.com --git-protocol https --web` | Browser "device flow" sign-in: a one-time code was approved at github.com/login/device, and the token went into the Windows credential store |
+| `gh repo create product-catalog-service --public --source . --remote origin` | Created the empty public repository and added it as the remote named `origin` |
+| `git push -u origin main` | Uploaded `5be2fc3`. `-u` made local `main` track `origin/main` |
+| `git ls-remote origin refs/heads/main` and `gh api repos/…/commits/main` | Asked GitHub which commit its `main` points to |
+
+**Actual checks**
+- `gh auth status`: signed in as `RishitheB0T`, token in the system keyring, scopes `repo`, `read:org`, `gist`.
+- The local `main`, `git ls-remote`, and the GitHub API all returned `5be2fc39…`, so GitHub has exactly our commit.
+- `gh repo view`: visibility `PUBLIC`, default branch `main`.
+- One hiccup: right after the successful push, the first `git ls-remote` failed with "Could not resolve host:
+  github.com" (a momentary DNS failure). Retrying it, and cross-checking through the API, gave the result above.
+
+**How the pieces connect**
+
+```text
+local commit ──git push──► origin (GitHub) ──► visible history; from Phase 14, CI runs on every push
+```

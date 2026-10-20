@@ -47,3 +47,24 @@ Concepts in the order we met them, each with small practice exercises.
 3. Run `git check-attr eol -- deploy.sh run.ps1` (the files don't need to exist). Which line ending does each one
    get, and why would it matter on EC2?
 4. In your own words: why is `mysql:latest` a bad choice for a project you want to rebuild exactly a year from now?
+
+<!-- BUILD FLOW 01.09.02 — Between Phases 01 and 02: GitHub -->
+## Between Phases 01 and 02 — GitHub
+
+**Concepts**
+- **Remote.** A named address of another copy of the repository. `origin` is the conventional name for the main one.
+- **Push and upstream.** `git push` uploads the commits the remote doesn't have yet. `-u` (upstream) remembers which
+  remote branch your local branch follows, so `git status` can say "ahead of 'origin/main' by 1 commit" and a
+  plain `git push` knows where to go.
+- **Device-flow sign-in.** The terminal shows a short code, and you approve it in a browser where you are already
+  signed in. The terminal never sees your password, and the token it receives is kept by the operating system's
+  credential store.
+- **Token scopes.** A token can do only what its scopes allow. `repo` allows repository work. Pushing GitHub
+  Actions workflow files needs an extra `workflow` scope (Phase 14).
+- **Verifying a push.** "The command printed no error" is weaker evidence than asking GitHub which commit its
+  `main` points to and comparing hashes.
+
+**Exercises**
+1. Make a commit but don't push it, then run `git status`. What does "ahead of 'origin/main' by 1 commit" mean?
+2. `git log --oneline origin/main -3` shows your *local copy* of what GitHub had at your last push or fetch.
+   Why could it differ from GitHub right now? (Hint: `git fetch`.)

@@ -377,8 +377,9 @@ and spacing system, and consistent components. Avoid a page made entirely of ove
 <!-- BUILD FLOW 01.01.12 — Git and GitHub rules -->
 ## 12. Git and GitHub rules
 
-Make real commits as work happens, on the `main` branch. Never force-push, rewrite or amend published history, make
-empty or backdated commits, split a finished repository into artificial history, or commit credentials.
+Make real commits as work happens, on the `main` branch, and push each one to the GitHub remote. Never force-push,
+rewrite or amend published history, make empty or backdated commits, split a finished repository into artificial
+history, or commit credentials.
 
 **Before every commit**
 1. Inspect `git status` and the relevant diff.
@@ -386,14 +387,18 @@ empty or backdated commits, split a finished repository into artificial history,
 3. Update `FILE_GUIDE.md`, `BUILD_GUIDE.md`, `PROGRESS.md`, and `LEARNING_LOG.md`, plus any other affected docs.
 4. Stage explicit paths (never a blind `git add .`), scan the staged diff for secrets, and commit with a meaningful message.
 5. Record the short hash in `PROGRESS.md` with the next commit (a commit cannot contain its own hash).
+6. Push to `origin`, then verify that GitHub's `main` points at the new commit: `git ls-remote origin refs/heads/main`
+   must print the same hash as `git rev-parse HEAD`. If a push fails, mark it pending in `PROGRESS.md` and keep
+   the commit local. Never report a push that did not succeed.
 
 A phase commit is complete when that phase's own feature, configuration, and docs can be verified. Never claim
 the unfinished project is complete.
 
-**GitHub.** The repository will be published on GitHub. Authenticate only through normal secure flows (Git
-Credential Manager or the GitHub CLI, both signing in through the browser). Commits stay local until a push
-succeeds; after pushing, verify that the remote branch points to the expected commit. The remote is needed before
-Phase 14 so that CI can be verified on GitHub.
+**GitHub remote.** `origin` is https://github.com/RishitheB0T/product-catalog-service (public, default branch
+`main`), created with the GitHub CLI on 2026-10-20 (decision D-009). Every commit is pushed right after it is made.
+Authentication uses normal secure flows only: Git Credential Manager for `git push`, and the GitHub CLI's browser
+device flow for `gh`. Tokens stay in the Windows credential store, never in files or commits. Commits stay local
+until a push succeeds.
 
 <!-- BUILD FLOW 01.01.13 — Documentation set -->
 ## 13. Documentation set

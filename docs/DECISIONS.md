@@ -84,6 +84,19 @@ history, with a pointer to its replacement).
 - **Why:** a detail key maps to exactly one row, so invalidation is precise. Search results depend on many rows and
   on the filters, so caching them would need broad invalidation.
 
+<!-- BUILD FLOW 01.08.04 — Decisions made after Phase 01 -->
+## D-009 · Public GitHub repository, pushed after every commit — Accepted (2026-10-20, before Phase 02)
+
+- **Context:** the history should be visible on GitHub as it grows, and CI (Phase 14) needs a remote.
+- **Decision:** the public repository `RishitheB0T/product-catalog-service`, created with GitHub CLI 2.102.0
+  (installed with winget, signed in through the browser device flow). After every commit, `origin/main` is pushed
+  and verified.
+- **Alternatives:** a private repository, which could be made public later; creating the repository on a
+  pre-filled github.com page instead of installing the CLI.
+- **Trade-offs:** everything committed is public immediately, so the secret scan before each commit matters even
+  more. In return, the step-by-step history is visible, GitHub Actions is free for public repositories, and `gh`
+  can check CI runs from the terminal in Phase 14.
+
 <!-- BUILD FLOW 01.08.03 — Open questions -->
 ## Open questions (each is decided in its phase)
 
