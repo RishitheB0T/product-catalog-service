@@ -1,0 +1,49 @@
+# BUILD FLOW 01.02 — .gitignore
+# First introduced: Phase 01
+# Purpose: List the files Git must never track: secrets, build output, downloaded
+#          dependencies, logs and local data, and editor or operating-system clutter.
+# Depends on: Nothing. Git reads this file before `git status` and `git add`.
+# Used by: Git, on every status/add/commit. Later phases may append sections.
+# Runtime role: None at application runtime; it protects every future commit.
+#
+# Syntax: one pattern per line. "name/" matches a directory with that name at any
+# depth. "*" is a wildcard. "!" re-includes something an earlier line excluded.
+# Ignoring only affects untracked files: it cannot hide a file that is already committed,
+# which is why these rules exist before the first commit.
+
+# BUILD FLOW 01.02.01 — Secrets and machine-specific configuration
+# Real .env files hold passwords. Only the placeholder template (.env.example) is committed.
+.env
+.env.*
+!.env.example
+# Private keys and certificates (for example an EC2 SSH key) must never enter Git history.
+*.pem
+*.key
+*.ppk
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+
+# BUILD FLOW 01.02.02 — Build output (recreated by the build tools)
+# Maven writes to target/, Vite to dist/, and test runners to coverage/.
+target/
+dist/
+coverage/
+
+# BUILD FLOW 01.02.03 — Downloaded dependencies (recreated from lockfiles)
+node_modules/
+
+# BUILD FLOW 01.02.04 — Logs and local data
+# Logs and database backups can contain real data, so they stay out of Git.
+*.log
+logs/
+backups/
+
+# BUILD FLOW 01.02.05 — Editors, IDEs, and operating systems
+.idea/
+*.iml
+.vscode/
+.DS_Store
+Thumbs.db
+desktop.ini

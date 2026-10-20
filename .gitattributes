@@ -1,0 +1,36 @@
+# BUILD FLOW 01.03 — .gitattributes
+# First introduced: Phase 01
+# Purpose: Make line endings predictable. We edit on Windows (CRLF line endings) but run
+#          scripts in Linux containers, CI, and on EC2 (LF). A shell script with CRLF
+#          endings fails on Linux with errors such as "$'\r': command not found".
+# Depends on: Git reading this file on every checkout and commit.
+# Used by: Git. These rules override this machine's system-wide core.autocrlf=true setting.
+# Runtime role: None at application runtime; it shapes every file later phases commit.
+#
+# Syntax: "<pattern> <attribute>[=value] ...". Later lines win when patterns overlap.
+
+# BUILD FLOW 01.03.01 — Default rule: text files use LF, in the repository and on disk
+# text=auto lets Git detect whether a file is text. eol=lf checks text files out with LF
+# too, so files copied into Linux images are already correct.
+* text=auto eol=lf
+
+# BUILD FLOW 01.03.02 — Windows-only scripts keep CRLF
+# cmd.exe can misread batch files saved with LF endings. PowerShell scripts follow the same
+# Windows convention. (The Maven Wrapper's mvnw.cmd from Phase 02 matches *.cmd.)
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+
+# BUILD FLOW 01.03.03 — Binary files: never convert line endings, never diff as text
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.webp  binary
+*.avif  binary
+*.ico   binary
+*.woff  binary
+*.woff2 binary
+*.jar   binary
+*.zip   binary
+*.gz    binary
