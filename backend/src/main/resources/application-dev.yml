@@ -1,0 +1,32 @@
+# BUILD FLOW 02.07 — backend/src/main/resources/application-dev.yml
+# First introduced: Phase 02
+# Purpose: Local-development settings, used only when the "dev" profile is active.
+# Depends on: application.yml (02.06). A key set here replaces the same key from the base file.
+# Used by: Spring Boot when started with the dev profile on this laptop, for example
+#          .\mvnw.cmd spring-boot:run "-Dspring-boot.run.profiles=dev". Never active on EC2.
+# Runtime role: Makes local runs easier to inspect.
+#
+# A profile is a named set of configuration. Spring Boot reads application.yml first, then
+# application-<profile>.yml for each active profile, and the profile's values win.
+
+# BUILD FLOW 02.07.01 — Local port
+server:
+  # 8080 is Spring Boot's default, but another program already listens on 8080 on the machine
+  # this project is developed on, so local runs use 8081. Containers (Phase 14) keep 8080:
+  # each container has its own network namespace, so its ports cannot collide with the host's.
+  port: 8081
+
+# BUILD FLOW 02.07.02 — Show full health details locally
+management:
+  endpoint:
+    health:
+      # Lists every health component (disk space now; the database from Phase 04). Useful when
+      # something is DOWN locally. The base and prod settings keep these details hidden.
+      show-details: always
+
+# BUILD FLOW 02.07.03 — More detailed logs for our own code
+logging:
+  level:
+    # DEBUG for classes under com.example.catalog only. Our classes start logging in Phase 05;
+    # libraries stay at their default INFO level so the console remains readable.
+    com.example.catalog: debug

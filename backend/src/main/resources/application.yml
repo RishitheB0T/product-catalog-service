@@ -1,0 +1,39 @@
+# BUILD FLOW 02.06 — backend/src/main/resources/application.yml
+# First introduced: Phase 02
+# Purpose: Base configuration, loaded in every environment. It holds SAFE defaults: unless a
+#          profile deliberately relaxes something, the app behaves the way production should.
+# Depends on: Property names defined by Spring Boot and Actuator.
+# Used by: Spring Boot at startup, before any of our objects are created. The profile files
+#          application-dev.yml (02.07) and application-prod.yml (02.08) are layered on top.
+# Runtime role: Names the application and decides what Actuator reveals over HTTP.
+#
+# YAML in 30 seconds: indentation (spaces only, never tabs) creates nesting, so
+#   management:
+#     endpoints:
+# is the property management.endpoints in .properties syntax. "key: value" sets a value and
+# "#" starts a comment.
+#
+# Deliberately not set here: server.port. The web server uses Spring Boot's default, 8080.
+
+# BUILD FLOW 02.06.01 — Application identity
+spring:
+  application:
+    # Appears in log lines and, later, in metrics as the service name.
+    name: catalog
+
+# BUILD FLOW 02.06.02 — Actuator: expose only the health endpoint over HTTP
+# Actuator offers many endpoints (env, beans, configprops, heapdump, ...). Several reveal
+# internals such as configuration values or memory contents, so HTTP exposure is limited to
+# "health". Spring Boot already defaults to this; writing it down makes the decision visible
+# and testable (HealthEndpointTest checks that /actuator/env answers 404).
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      # never: callers see the overall status ("UP" or "DOWN") and the names of the liveness and
+      # readiness probe groups that Spring Boot 4 enables automatically, but not which components
+      # exist or why one failed. The dev profile shows the details; production keeps them hidden.
+      show-details: never

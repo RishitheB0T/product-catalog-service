@@ -17,7 +17,8 @@ Runtime role: None. Documentation only.
 
 | Item | Value |
 |---|---|
-| Current phase | **02 — in progress.** GitHub remote connected; the backend skeleton is next |
+| Current phase | **02 — complete** |
+| Next phase | 03 — local MySQL and Redis with Docker Compose, plus environment examples |
 | Branch | `main`, tracking `origin/main` |
 | Repository | https://github.com/RishitheB0T/product-catalog-service (public) |
 | Last updated | 2026-10-20 |
@@ -27,6 +28,8 @@ Runtime role: None. Documentation only.
 | Step | Commit | Message | On GitHub |
 |---|---|---|---|
 | Phase 01 | `5be2fc3` | `docs: define catalog architecture and phased build plan` | Pushed and verified |
+| Between 01 and 02 | `225433f` | `docs: connect GitHub remote` | Pushed and verified |
+| Phase 02 | Recorded at the start of Phase 03 | `chore(backend): bootstrap Spring Boot application` | Pushed and verified when committed |
 
 <!-- BUILD FLOW 01.10.02 — Checks run in Phase 01 -->
 ## Checks run in Phase 01
@@ -47,6 +50,24 @@ pushes, deployments.
 keyring. After `git push -u origin main`, the local hash, `git ls-remote`, and the GitHub API all returned
 `5be2fc39…`. `gh repo view` showed visibility `PUBLIC` and default branch `main`.
 
+<!-- BUILD FLOW 01.10.06 — Checks run in Phase 02 -->
+## Checks run in Phase 02
+
+All ran on 2026-10-20. Full details, including two problems found and fixed, are in `BUILD_GUIDE.md`, Phase 02.
+- Maven 3.10.0 zip: SHA-512 matched Apache's and Maven Central's published values, and the wrapper accepted our SHA-256 pin.
+- `.\mvnw.cmd clean verify`: 6 tests, 0 failures; runnable jar built. (The first run had 2 failures caused by
+  Spring Boot 4's probe groups; the tests were corrected to check the intent.)
+- Dev run (`spring-boot:run`, `dev` profile): port 8081, health UP with component details, `/actuator/env` 404.
+- Prod run (`java -jar`, `prod` profile): health UP without details, readiness UP, `/actuator/env` 404, no banner.
+  The first prod jar lacked its YAML files; a `clean verify` fixed it (likely cause: the editor's background build).
+- Git: `backend/mvnw` is executable (`100755`); `mvnw.cmd` has CRLF in the working tree.
+
+**Carry-forward items**
+- Tests print a JDK warning about a dynamically loaded agent (Mockito/Byte Buddy). Configure the agent properly
+  when mocks are first used (Phase 05).
+- The VS Code Java extension may build into `backend/target/` in the background. Use `clean` for jars you run or
+  ship; Phase 14 builds images in clean containers and checks the artifact itself.
+
 <!-- BUILD FLOW 01.10.03 — Environment -->
 ## Environment (inspected 2026-10-20)
 
@@ -59,7 +80,9 @@ keyring. After `git push -u origin main`, the local hash, `git ls-remote`, and t
 | JDK | Microsoft Build of OpenJDK 21.0.12.1; `JAVA_HOME` set |
 | Docker | Engine 29.6.2 (WSL 2 backend) and Compose v5.3.1; the engine was running |
 | Node.js / npm | 26.8.1 ("Current"; becomes LTS on 2026-10-28) / 11.19.0 |
-| Not installed | Maven (not needed; the wrapper downloads it), k6 (planned to run from Docker), AWS CLI (decided in Phase 15) |
+| Maven | 3.10.0 through the wrapper (downloaded to the user's `.m2` folder on 2026-10-20; checksum-verified) |
+| Ports | 8080 is occupied by another program, so the `dev` profile uses 8081 |
+| Not installed | k6 (planned to run from Docker), AWS CLI (decided in Phase 15) |
 
 <!-- BUILD FLOW 01.10.04 — Blockers and pending items -->
 ## Blockers and pending items
@@ -74,8 +97,10 @@ keyring. After `git push -u origin main`, the local hash, `git ls-remote`, and t
 <!-- BUILD FLOW 01.10.05 — Next action -->
 ## Next action
 
-Phase 02 is in progress, using the default package `com.example.catalog`:
-1. Generate `backend/` with Spring Initializr (Spring Boot 4.1.1, Java 21, Maven) with Web MVC, Validation, and
-   Actuator only. Pin the wrapper to Maven 3.10.0, and add profiles and a health-check test.
-2. Run `.\mvnw.cmd test`, start the application, and call `/actuator/health`.
-3. Commit `chore(backend): bootstrap Spring Boot application`, then push and verify.
+Next:
+1. Record Phase 02's commit hash in the commits table above.
+2. Phase 03: check that host ports 3306 and 6379 are free; re-verify the `mysql:8.4.x` and `redis:8.10.x` patch tags;
+   write `infra/` Compose services (pinned images, named MySQL volume, health checks, ports bound to `127.0.0.1`),
+   `.env.example` with placeholders, and small PowerShell helpers.
+3. Verify: containers healthy, `SELECT VERSION()`, Redis `PING`, ports bound to `127.0.0.1` only, `.env` ignored.
+4. Commit `chore(infra): add local MySQL and Redis services`, push, and verify on GitHub.

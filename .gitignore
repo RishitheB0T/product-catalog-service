@@ -47,3 +47,20 @@ backups/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# BUILD FLOW 01.02.06 — Java editor metadata and wrapper binaries (added in Phase 02)
+# Eclipse/STS and the VS Code Java extension can create these files; IntelliJ creates *.iws and
+# *.ipr. They describe one person's editor setup, not the project, so they stay local.
+.classpath
+.project
+.settings/
+.factorypath
+.apt_generated/
+.springBeans
+.sts4-cache/
+*.iws
+*.ipr
+# Our Maven Wrapper runs in "only-script" mode, which needs no jar. If a wrapper jar ever
+# appears, keep it out. The **/ prefix matches it inside backend/ too: a pattern with a slash
+# in the middle would otherwise only match relative to this file's own folder.
+**/.mvn/wrapper/maven-wrapper.jar

@@ -135,3 +135,92 @@ docs/BUILD_GUIDE.md  ◄── updated every phase ──►  docs/FILE_GUIDE.md
 ```text
 local commit ──git push──► origin (GitHub) ──► visible history; from Phase 14, CI runs on every push
 ```
+
+<!-- BUILD FLOW 01.05.04 — Phase 02 -->
+## Phase 02 — Spring Boot skeleton, profiles, and a health check
+
+**What we had before.** Documentation only, now on GitHub. No code.
+
+**What we add.** A Maven project in `backend/`: Spring Boot 4.1.1 on Java 21 with only Web MVC, Validation, and
+Actuator; a Maven Wrapper pinned to Maven 3.10.0 with a verified checksum; a main class; three configuration files
+(base, `dev`, `prod`); and tests that start the real application and call it over HTTP.
+
+**Why.** It is the smallest runnable backend. It settles the build tool, how configuration is layered, how the app
+reports health (Docker health checks in Phase 14 will rely on it), and how we test, all before any business code.
+Database and Redis libraries are left out on purpose (decision D-004): with them on the classpath, the app would
+refuse to start without MySQL.
+
+**Files in order**
+
+| BUILD FLOW | File | Role |
+|---|---|---|
+| 02.01 | `backend/pom.xml` | Build description: parent, Java version, starters, packaging |
+| 02.02 | `backend/mvnw` | Generated wrapper script (Linux) |
+| 02.03 | `backend/mvnw.cmd` | Generated wrapper script (Windows) |
+| 02.04 | `backend/.mvn/wrapper/maven-wrapper.properties` | Generated wrapper settings plus our SHA-256 pin |
+| 02.05 | `backend/src/main/java/com/example/catalog/CatalogApplication.java` | Entry point |
+| 02.06 | `backend/src/main/resources/application.yml` | Base configuration (safe defaults) |
+| 02.07 | `backend/src/main/resources/application-dev.yml` | Dev profile |
+| 02.08 | `backend/src/main/resources/application-prod.yml` | Prod profile |
+| 02.09 | `backend/src/test/java/com/example/catalog/HealthEndpointTest.java` | Real-HTTP tests under three configurations |
+
+Modified: `.gitignore` (01.02) gained section 01.02.06 for Java editor metadata and a wrapper jar.
+Generated but not kept: `HELP.md`, `backend/.gitignore`, `backend/.gitattributes`, `application.properties`,
+`CatalogApplicationTests` (reasons in `FILE_GUIDE.md`).
+
+**Relevant syntax**
+- *XML (`pom.xml`)*: nested elements (`<parent>…</parent>`). A comment `<!-- … -->` may not contain two hyphens in a
+  row, which is why the comments never spell out command-line flags.
+- *Maven coordinates*: `groupId:artifactId:version` identifies every library. `<scope>test</scope>` limits a
+  dependency to tests.
+- *Java*: `package` (the folder-like namespace), `import`, annotations (`@SpringBootApplication`, `@Test`),
+  `public static void main(String[] args)` (the JVM's entry point), `static final` (one shared constant),
+  `throws` (a method may fail with these checked exceptions), generics (`HttpResponse<String>` is a response whose
+  body is a `String`), and inner classes marked `@Nested`.
+- *YAML*: indentation creates nesting, and text that YAML treats specially (`off`, `on`, `yes`, `no`) must be quoted.
+- *PowerShell*: quote `-D` arguments containing dots, for example `"-Dspring-boot.run.profiles=dev"`.
+
+**Commands we ran** (PowerShell; Maven commands run inside `backend/`)
+
+| Command | Purpose |
+|---|---|
+| Download from start.spring.io (Boot 4.1.1, Java 21, Maven, `web`, `validation`, `actuator`) | Generate the skeleton into a scratch folder, then copy selected files |
+| Download Maven 3.10.0, compare its SHA-512 with Apache's and Maven Central's published values, then compute its SHA-256 | Produce a trustworthy `distributionSha256Sum` |
+| `git add --chmod=+x -- backend/mvnw` | Record the executable bit Linux needs |
+| `.\mvnw.cmd --version` | First wrapper run: downloads and verifies Maven 3.10.0 |
+| `.\mvnw.cmd -B -ntp verify` and later `clean verify` | Compile, test, and package (`-B`: batch mode, `-ntp`: no download progress) |
+| `.\mvnw.cmd help:effective-pom` | Show the merged configuration Maven really uses (while investigating) |
+| `.\mvnw.cmd spring-boot:run "-Dspring-boot.run.profiles=dev"` | Run locally with the dev profile |
+| `java -jar target\catalog-0.0.1-SNAPSHOT.jar --spring.profiles.active=prod --server.port=8082` | Run the packaged jar the way a server would (8082 only because 8080 is occupied on this laptop) |
+| `curl.exe http://localhost:<port>/actuator/health` (and `/readiness`, `/env`) | Call the running app |
+
+**Expected behavior.** All tests pass. The app starts in a few seconds. `/actuator/health` returns 200 with
+`"status":"UP"`. Component details appear only with `dev`. `/actuator/env` returns 404 everywhere. The prod jar
+prints no banner.
+
+**Actual checks** (2026-10-20)
+
+| Check | Result |
+|---|---|
+| Wrapper first run | Maven 3.10.0 downloaded, accepted by the SHA-256 pin, running on JDK 21.0.12.1 |
+| First `verify` | **2 of 5 tests failed.** Spring Boot 4 enables liveness/readiness probe groups automatically, so the body is `{"groups":["liveness","readiness"],"status":"UP"}`, not `{"status":"UP"}`. Confirmed in the Actuator docs. Tests changed to check the intent (UP, no component details) and a probe test was added (decision D-013) |
+| Second `verify` | 6 tests, 0 failures. Jar built (22.5 MB) |
+| Dev run | Profile `dev`, Tomcat on 8081, started in 2.7 s. Health 200 with components (diskSpace, ping, ssl, livenessState, readinessState); `/actuator/env` 404 |
+| First prod-jar run | **Problem found:** banner printed and no `[catalog]` name in the logs. The jar contained no `application*.yml` files, although the build log showed them copied to `target/classes` and the dev test (which needs them) had passed |
+| Investigation | `.jar.original` (Maven's own jar) also lacked them; the effective POM had no exclusions; the VS Code Java language server was running. A `clean verify` produced a jar with all 3 YAML files. Most likely cause: the editor's background build rewrote `target/` while Maven was packaging (not proven) |
+| Second prod-jar run (after `clean verify`) | No banner, `[catalog]` in every log line, profile `prod`, health UP without details, `/actuator/env` 404 |
+| Warnings | During tests only, the JDK warns about a "dynamically loaded agent" (Mockito's helper, Byte Buddy). Harmless today; to be configured properly when mocks arrive in Phase 05 |
+| Git | `backend/mvnw` stored as executable (`100755`); `mvnw.cmd` checked out with CRLF, stored with LF |
+
+Lessons: a test suite can pass while the shipped artifact is wrong, so check the artifact itself. Build what you
+ship from a clean state. Phase 14 builds images inside clean containers and will smoke-test production-only behavior.
+
+**How the pieces connect**
+
+```text
+mvnw.cmd ──reads──► maven-wrapper.properties ──downloads + verifies──► Maven 3.10.0
+Maven ──reads──► pom.xml ──inherits──► spring-boot-starter-parent 4.1.1 (tested library versions)
+  └─ compile ─► test (HealthEndpointTest starts the app 3 times) ─► package (runnable jar)
+java -jar / spring-boot:run ─► CatalogApplication.main ─► SpringApplication.run
+  ─reads─► application.yml + application-<profile>.yml ─► Tomcat + Actuator ─► /actuator/health
+```

@@ -97,12 +97,60 @@ history, with a pointer to its replacement).
   more. In return, the step-by-step history is visible, GitHub Actions is free for public repositories, and `gh`
   can check CI runs from the terminal in Phase 14.
 
+## D-010 · Java package `com.example.catalog` — Accepted (Phase 02)
+
+- **Context:** Spring Initializr needs a group and package name when it generates the project.
+- **Decision:** groupId `com.example`, base package `com.example.catalog`.
+- **Why:** `example.com` is reserved for documentation (RFC 2606), so the name never claims someone else's domain.
+- **Alternative:** a namespace tied to the GitHub account, such as `io.github.rishitheb0t.catalog`.
+- **Trade-off:** it looks generic. Renaming later is a mechanical refactor that gets bigger as the code grows.
+
+## D-011 · Safe defaults in the base configuration; profiles relax or pin them — Accepted (Phase 02)
+
+- **Decision:** `application.yml` holds production-safe settings. The `dev` profile relaxes them (health details,
+  DEBUG logs for our package, port 8081). The `prod` profile restates the locked-down values, so an edit to the
+  base file cannot loosen production.
+- **Alternative:** a developer-friendly base file plus a strict `prod` profile.
+- **Trade-off:** local runs must remember `dev`. The alternative fails worse: forgetting to activate `prod` on a
+  server would expose development settings publicly.
+
+## D-012 · Pin the Maven download with a verified SHA-256 — Accepted (Phase 02)
+
+- **Decision:** `distributionSha256Sum` in `maven-wrapper.properties`. The value was computed only after the
+  downloaded zip's SHA-512 matched both Apache's and Maven Central's published values.
+- **Why:** the wrapper scripts refuse to run a tampered or corrupted Maven download.
+- **Trade-off:** upgrading Maven means updating the URL and the checksum together.
+
+## D-013 · Keep Spring Boot 4's liveness/readiness probes; test the intent, not exact JSON — Accepted (Phase 02)
+
+- **Context:** Spring Boot 4 enables the liveness and readiness probe groups automatically, so the health body is
+  `{"groups":["liveness","readiness"],"status":"UP"}`. Our first test expected `{"status":"UP"}` and failed.
+- **Decision:** keep the probes; Phase 14 container health checks can use `/actuator/health/readiness`. Tests now
+  assert "UP, and no component details", and a separate test checks both probe URLs.
+- **Alternative:** `management.endpoint.health.probes.enabled: false` to get exactly `{"status":"UP"}`.
+- **Trade-off:** the public body reveals two group names, which is harmless; component details stay hidden.
+
+## D-014 · Health tests call the real server with the JDK's HttpClient — Accepted (Phase 02)
+
+- **Alternatives:** MockMvc (no real server or port), Spring's `RestTestClient` (needs
+  `@AutoConfigureRestTestClient`), `TestRestTemplate` (needs the extra `spring-boot-restclient` dependency in
+  Spring Boot 4).
+- **Why:** no extra dependency or annotation, the HTTP call is plain to read, and it exercises Tomcat, Spring MVC,
+  Actuator, and the configuration files together.
+- **Revisit:** the API tests in Phases 05–07 need JSON assertions and may use `RestTestClient` or MockMvc.
+
+## D-015 · Local development port 8081 — Accepted (Phase 02)
+
+- **Context:** another program listens on port 8080 on the development machine.
+- **Decision:** the `dev` profile sets `server.port: 8081`. The base and `prod` settings keep Spring Boot's
+  default 8080, which is safe inside containers because each container has its own network namespace.
+- **Trade-off:** local tools must point at 8081, including the Vite dev proxy in Phase 12.
+
 <!-- BUILD FLOW 01.08.03 — Open questions -->
 ## Open questions (each is decided in its phase)
 
 | Question | Phase |
 |---|---|
-| Final Java base package (`com.example.catalog` proposed) | 02 |
 | Demo-data mechanism (a dev-only Flyway location proposed) | 04 |
 | Error body format: Spring's `ProblemDetail` (RFC 9457) or a custom record | 05 |
 | Status code for writes rejected in read-only mode | 05 |

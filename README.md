@@ -14,8 +14,9 @@ A product catalog built from an empty folder in documented phases, with every fi
 **Spring Boot** REST API over **MySQL**, **Redis** caching for product details, and a **React** storefront that
 uses the real API.
 
-> **Status: Phase 01 of 16 complete — planning only. Nothing runs yet.**
-> This README always describes what actually works. Anything not built yet is labeled *planned*.
+> **Status: Phase 02 of 16 complete.** The backend skeleton builds, passes its tests, and answers health checks.
+> There are no catalog features yet. This README always describes what actually works; anything not built yet is
+> labeled *planned*.
 
 <!-- BUILD FLOW 01.04.01 — What works today -->
 ## What works today
@@ -23,7 +24,8 @@ uses the real API.
 | Area | Status |
 |---|---|
 | Plan, architecture, verified version baseline | Done (Phase 01) |
-| Spring Boot API: CRUD, search, validation, errors | Planned (Phases 02–07) |
+| Spring Boot skeleton: build, tests, profiles, health check | Done (Phase 02) |
+| Spring Boot API: CRUD, search, validation, errors | Planned (Phases 04–07) |
 | MySQL schema and measured query optimization | Planned (Phases 04 and 08) |
 | Redis product-detail cache | Planned (Phases 09–10) |
 | Benchmarks and performance report | Planned (Phase 11) |
@@ -94,13 +96,47 @@ GitHub Actions. The exact versions, verified against official sources on 2026-10
 | k6 | Benchmarks | Planned to run from its Docker image, so nothing to install |
 
 <!-- BUILD FLOW 01.04.06 — Running, testing, evidence, deployment -->
-## Quick start
+## Quick start (backend only, so far)
 
-Nothing runs yet. Phase 02 adds the first runnable backend.
+Run these in PowerShell from the repository root. You need JDK 21; the first run downloads Maven and the libraries.
+
+```powershell
+cd backend
+.\mvnw.cmd spring-boot:run "-Dspring-boot.run.profiles=dev"
+```
+
+Then, in a second terminal:
+
+```powershell
+curl.exe http://localhost:8081/actuator/health
+```
+
+You should see `"status":"UP"` together with component details, which only the dev profile shows. Stop the app with Ctrl+C.
+
+- Keep the quotes around `-Dspring-boot.run.profiles=dev`. Windows PowerShell splits an unquoted argument like
+  this at its first dot, so Maven would receive the wrong setting.
+- The dev profile uses port **8081** because another program occupies 8080 on the development machine.
+
+Production-style run of the packaged jar (prod profile: no health details, no banner):
+
+```powershell
+cd backend
+.\mvnw.cmd clean verify
+java -jar target\catalog-0.0.1-SNAPSHOT.jar --spring.profiles.active=prod
+```
+
+The jar listens on port 8080 unless you add `--server.port=<port>`.
 
 ## Tests
 
-None yet. Tests arrive with the features they protect, starting in Phase 02.
+```powershell
+cd backend
+.\mvnw.cmd verify
+```
+
+Phase 02 has 6 tests in `HealthEndpointTest`. They start the real application three times (no profile, `dev`, and
+`prod`) and call it over HTTP. They check that health is UP, that component details appear only with `dev`, that the
+liveness and readiness probes answer, and that internal endpoints such as `/actuator/env` return 404.
 
 ## Performance evidence
 

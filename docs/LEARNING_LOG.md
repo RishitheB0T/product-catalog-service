@@ -68,3 +68,45 @@ Concepts in the order we met them, each with small practice exercises.
 1. Make a commit but don't push it, then run `git status`. What does "ahead of 'origin/main' by 1 commit" mean?
 2. `git log --oneline origin/main -3` shows your *local copy* of what GitHub had at your last push or fetch.
    Why could it differ from GitHub right now? (Hint: `git fetch`.)
+
+<!-- BUILD FLOW 01.09.03 — Phase 02 -->
+## Phase 02 — Spring Boot skeleton
+
+**Concepts**
+- **Maven and the POM.** Maven builds Java projects. `pom.xml` names the project (coordinates), lists libraries
+  (dependencies), and configures build steps (plugins). Running a lifecycle phase also runs every phase before it:
+  `verify` includes compile, test, and package.
+- **Parent POM and bill of materials.** `spring-boot-starter-parent` supplies one tested version for each library,
+  so our dependencies don't state versions. Changing the parent's version upgrades them together.
+- **Starters.** A starter is one dependency that brings a library plus Spring Boot's automatic setup for it.
+- **Maven Wrapper.** `mvnw.cmd` / `mvnw` download the exact Maven version the project pins, so nobody installs Maven
+  by hand. Our SHA-256 pin makes the wrapper reject a tampered download.
+- **Auto-configuration and the application context.** At startup Spring Boot looks at the classpath and configures
+  what it finds (Tomcat, Spring MVC, Actuator). The application context is the container holding the objects it
+  creates, called *beans*.
+- **Component scanning.** Spring looks for annotated classes in the main class's package and its sub-packages, which
+  is why all our classes live under `com.example.catalog`.
+- **Embedded server and fat jar.** Tomcat runs inside our application, not the other way round. `java -jar` starts
+  everything from one file that contains our classes plus all libraries.
+- **Profiles.** Named sets of configuration. `application-dev.yml` overrides `application.yml` only when `dev` is
+  active. Command-line options such as `--server.port=8082` override both.
+- **Actuator and health.** Operational endpoints. `/actuator/health` combines health indicators into UP or DOWN
+  (HTTP 200 or 503). *Liveness* means "the process is alive"; *readiness* means "it can take traffic now". Details
+  can reveal internals (we saw a real folder path), so production hides them.
+- **Tests.** `@Test` marks a test method. `@Nested` groups tests in an inner class. `@SpringBootTest(webEnvironment =
+  RANDOM_PORT)` starts the real app on a free port, `@LocalServerPort` injects that port, and `@ActiveProfiles`
+  selects a profile. AssertJ reads like a sentence: `assertThat(x).isEqualTo(y)`.
+- **A red test is information.** Our first run failed because Spring Boot 4 changed the health body. We checked
+  the docs, decided the new behavior was fine, and changed the test to express the real intent.
+- **Check the artifact, not just the tests.** All tests passed while the jar was missing its configuration files.
+  Running the jar the way a server would is what exposed it. Build what you ship from a clean state.
+- **Quoting in PowerShell.** `"-Dspring-boot.run.profiles=dev"` needs quotes; YAML needs quotes around `"off"`.
+
+**Exercises**
+1. Run the app with the dev profile and open http://localhost:8081/actuator/health in a browser. Find the
+   disk-space path. Explain in one sentence why production hides it.
+2. Temporarily change `show-details: never` to `always` in `application-prod.yml` and run `.\mvnw.cmd verify`.
+   Which test fails, and why is that failure a good thing? Then undo the change.
+3. Run the jar with `--spring.profiles.active=prod --server.port=8082`. Which log line proves the profile, and what
+   is missing from the top of the log compared with a run without a profile?
+4. Why does `mvnw` need Git's executable bit while `mvnw.cmd` does not?

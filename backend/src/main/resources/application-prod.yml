@@ -1,0 +1,30 @@
+# BUILD FLOW 02.08 — backend/src/main/resources/application-prod.yml
+# First introduced: Phase 02
+# Purpose: Production settings, used only when the "prod" profile is active. The Docker image
+#          (Phase 14) and EC2 (Phase 15) will start the app with SPRING_PROFILES_ACTIVE=prod.
+# Depends on: application.yml (02.06).
+# Used by: Spring Boot when the prod profile is active.
+# Runtime role: Pins the locked-down settings for public deployments.
+#
+# Why repeat values that application.yml already sets? Profile values win over base values.
+# Writing the production values here means a later edit to the base file (for example, someone
+# shows health details while debugging) cannot loosen production by accident.
+# Later phases add production-only settings here: the read-only write switch (Phase 05) and
+# database/Redis connection settings read from environment variables (Phase 14).
+
+# BUILD FLOW 02.08.01 — Keep diagnostics private
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: never
+
+# BUILD FLOW 02.08.02 — Quieter startup output
+spring:
+  main:
+    # Hide the ASCII-art banner in container logs. The quotes matter: in YAML 1.1 an unquoted
+    # off means the boolean false, not the text "off" that Spring Boot expects here.
+    banner-mode: "off"

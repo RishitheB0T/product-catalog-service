@@ -36,8 +36,29 @@ here instead. Binary and generated internals are grouped rather than listed line
 | 01.09 | `docs/LEARNING_LOG.md` | Concepts learned and small exercises for each phase | Build Guide | Readers | After each phase |
 | 01.10 | `docs/PROGRESS.md` | Current phase, last commit, checks, blockers, next action | All docs | Read first when resuming work | Whenever work resumes |
 
+<!-- BUILD FLOW 01.06.04 — backend/ (added in Phase 02) -->
+## backend/
+
+| BUILD FLOW | Path | Purpose | Depends on | Caller / consumer | When to read |
+|---|---|---|---|---|---|
+| 02.01 | `backend/pom.xml` | Maven build: Spring Boot 4.1.1 parent, Java 21, the starters (Web MVC, Validation, Actuator, and their test starters), runnable-jar packaging | Maven Wrapper, Maven Central | `mvnw.cmd` / `mvnw`; CI and Docker from Phase 14 | When adding a dependency or changing the build |
+| 02.02 | `backend/mvnw` | **(generated)** Maven Wrapper script for Linux and macOS (CI, Docker, EC2): downloads the pinned Maven, checks its SHA-256, runs it. Stored with LF endings and the executable bit | `backend/.mvn/wrapper/maven-wrapper.properties` | Linux builds from Phase 14 | Only if the build tool itself misbehaves |
+| 02.03 | `backend/mvnw.cmd` | **(generated)** The same wrapper for Windows, checked out with CRLF endings | `backend/.mvn/wrapper/maven-wrapper.properties` | Windows development machines | Only if the build tool itself misbehaves |
+| 02.04 | `backend/.mvn/wrapper/maven-wrapper.properties` | **(generated, plus one setting)** Pins Maven 3.10.0 and wrapper 3.3.4. We added `distributionSha256Sum`, verified against Apache's published SHA-512 | — | `mvnw`, `mvnw.cmd` | When upgrading Maven: change the URL and the checksum together |
+| 02.05 | `backend/src/main/java/com/example/catalog/CatalogApplication.java` | Entry point that starts Spring Boot. Its package is where component scanning starts | Spring Boot auto-configuration, the YAML files | The JVM, `spring-boot:run`, `@SpringBootTest` | The first Java file to read |
+| 02.06 | `backend/src/main/resources/application.yml` | Base configuration with safe defaults: app name, Actuator exposure limited to health, no health details | — | Spring Boot at startup | Before changing any setting |
+| 02.07 | `backend/src/main/resources/application-dev.yml` | Dev profile: port 8081, full health details, DEBUG logs for our package | `application.yml` | Local runs with the `dev` profile | When running locally |
+| 02.08 | `backend/src/main/resources/application-prod.yml` | Prod profile: locked-down Actuator settings pinned, banner off | `application.yml` | Docker and EC2 (Phases 14–15) | Before deploying |
+| 02.09 | `backend/src/test/java/com/example/catalog/HealthEndpointTest.java` | Real-HTTP tests of health, probes, and hidden endpoints under the base, dev, and prod configurations | 02.05–02.08, JUnit 6, AssertJ, Spring Boot test support | Maven Surefire (`mvnw verify`) | To see how profiles change behavior |
+
+Files the generator produced that we did **not** keep: `HELP.md` (links only), `backend/.gitignore` and
+`backend/.gitattributes` (the root files cover them; the useful Java-IDE patterns moved into the root `.gitignore`),
+`application.properties` (replaced by the YAML files), and `CatalogApplicationTests` (`HealthEndpointTest` also
+starts the application).
+
 <!-- BUILD FLOW 01.06.03 — Generated files -->
 ## Generated files
 
-None yet. Phase 02 adds the Maven Wrapper files and Phase 12 adds `package-lock.json`. They will be listed here,
-marked **(generated)**.
+Generated files are never edited to add comments. Their explanation lives in the rows above.
+- Maven Wrapper (Phase 02): `backend/mvnw`, `backend/mvnw.cmd`, `backend/.mvn/wrapper/maven-wrapper.properties`.
+- Coming later: `package-lock.json` (Phase 12).

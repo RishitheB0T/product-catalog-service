@@ -552,7 +552,9 @@ their phase, or changed with a `DECISIONS.md` entry.
 - GitHub Actions: backend `verify` (including Testcontainers) and frontend lint, test, and build.
 - Write `docs/DEPLOYMENT.md` (local production-style run).
 - Checks: the stack is healthy, smoke tests pass through Nginx, writes are rejected in read-only mode, a clean
-  checkout rebuilds, and CI is green on GitHub (requires the remote).
+  checkout rebuilds, and CI is green on GitHub. Also check the built artifact itself: the image's jar contains its
+  configuration files, and production-only settings are visibly active (lesson from Phase 02, when tests passed
+  but a jar built next to an editor's background build was missing its YAML files).
 
 ### Phase 15 — EC2
 - Write the scripts and runbook first. Then propose the instance, region, and cost for approval, and deploy only
