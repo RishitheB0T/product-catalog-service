@@ -29,6 +29,22 @@ management:
       # something is DOWN locally. The base and prod settings keep these details hidden.
       show-details: always
 
+# BUILD FLOW 02.07.04 — Database connection for local development (added in Phase 04)
+spring:
+  config:
+    # Read infra/.env (written by scripts/dev-services.ps1) as an extra properties file, so the database password
+    # lives in exactly one place. "optional:" means no error if the file is missing; "[.properties]" tells Spring
+    # Boot how to parse a file whose name has no known extension. The path is relative to the folder the
+    # application starts in, which is backend/.
+    import: optional:file:../infra/.env[.properties]
+  datasource:
+    # ${NAME:default} reads a property (here from infra/.env) and falls back to the value after ":" if it is
+    # missing. connectionTimeZone=UTC tells the MySQL driver to treat DATETIME values as UTC, matching
+    # hibernate.jdbc.time_zone in application.yml.
+    url: jdbc:mysql://127.0.0.1:${MYSQL_HOST_PORT:24306}/${MYSQL_DATABASE:catalog}?connectionTimeZone=UTC
+    username: ${MYSQL_USER:catalog}
+    password: ${MYSQL_PASSWORD:}
+
 # BUILD FLOW 02.07.03 — More detailed logs for our own code
 logging:
   level:

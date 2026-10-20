@@ -188,12 +188,64 @@ history, with a pointer to its replacement).
 - **Revisit:** Phase 14 decides authentication and memory settings for the production stack, where Redis is not
   published on any host port.
 
+## D-020 · Product schema: rules in the database, too — Accepted (Phase 04)
+
+- **Decision:** one `product` table created by Flyway (`V1`). Categories are `VARCHAR` plus a `CHECK` allowlist
+  rather than MySQL's `ENUM` type. Prices are `DECIMAL(10,2)`; a `BIGINT version` column supports optimistic locking.
+  Six named `CHECK` constraints (SKU format, non-blank name and description, category, non-negative price and stock)
+  plus a named unique key on `sku`. No search indexes yet.
+- **Why:** validation in the API (Phase 05) can be bypassed by any other client or a bug; database constraints
+  cannot. Named constraints make errors readable. `VARCHAR` + `CHECK` is portable and easy to change with a migration,
+  whereas `ENUM` sorts by position and needs a table rebuild for some changes. Leaving indexes out keeps a genuine
+  "before" baseline for the measured optimization in Phase 08.
+- **Trade-off:** the category list lives in two places (the Java enum and the constraint), which must change together.
+
+## D-021 · Timestamps: `Instant` stored as UTC in `DATETIME(6)` — Accepted (Phase 04)
+
+- **Decision:** `Instant` fields, `DATETIME(6)` columns, `hibernate.jdbc.time_zone=UTC`, and `connectionTimeZone=UTC`
+  in the development connection URL. The entity sets the values in `@PrePersist`/`@PreUpdate`, truncated to
+  microseconds; column defaults (`UTC_TIMESTAMP(6)`) serve only SQL seed scripts.
+- **Why:** the development JVM runs in IST, and servers often run in UTC. Storing UTC makes values comparable
+  everywhere. `TIMESTAMP` would also store UTC but ends on 2038-01-19; `DATETIME(6)` does not.
+- **Evidence:** a test reads the raw column and compares it with the `Instant` converted to UTC. In development the
+  stored value was exactly 5 h 30 min behind the IST wall clock.
+
+## D-022 · Demo data through a dev-only loader, not a Flyway migration — Accepted (Phase 04)
+
+- **Context:** the plan proposed a Flyway location enabled only in `dev`.
+- **Problem:** a database that has once run with `dev` would then contain a migration that other configurations do
+  not know about, and Flyway's validation refuses to start in that situation. Flyway should track the schema, not
+  optional sample data.
+- **Decision:** `DemoDataLoader`, a `@Profile("dev")` bean, runs `db/demo/demo-products.sql` after startup, and only
+  when the table is empty.
+- **Trade-off:** changes to the demo file reach a database only after it has been emptied (for example with
+  `dev-services.ps1 reset -Force`).
+
+## D-023 · One shared MySQL test container for the whole test run — Accepted (Phase 04)
+
+- **Decision:** `TestcontainersConfiguration` holds one static `mysql:8.4.11` container that every Spring test context
+  uses through `@ServiceConnection`.
+- **Why:** each MySQL container needs several seconds and about 400 MB of memory; this machine is short on both. The
+  first full run used one container for six test contexts.
+- **Consequence:** tests must not depend on table contents. Each test creates uniquely named rows; `@DataJpaTest`
+  rolls back; the demo-data test empties the table first.
+- **Alternatives:** a new container per test class (slower, more memory); an in-memory database (not MySQL, so
+  constraints, SQL dialect, and time handling would differ).
+
+## D-024 · Open Session in View disabled — Accepted (Phase 04)
+
+- **Decision:** `spring.jpa.open-in-view: false`.
+- **Why:** with it on, a database session stays open until the HTTP response is written, so data can be loaded
+  lazily while JSON is rendered. That hides queries, holds database connections longer, and blurs the line between
+  layers. With it off, the service loads what a response needs inside its own transaction (Phase 05).
+- **Trade-off:** touching an unloaded association outside a transaction fails loudly (`LazyInitializationException`)
+  instead of silently running extra queries, which is the point.
+
 <!-- BUILD FLOW 01.08.03 — Open questions -->
 ## Open questions (each is decided in its phase)
 
 | Question | Phase |
 |---|---|
-| Demo-data mechanism (a dev-only Flyway location proposed) | 04 |
 | Error body format: Spring's `ProblemDetail` (RFC 9457) or a custom record | 05 |
 | Status code for writes rejected in read-only mode | 05 |
 | How the client sends the expected version: a body field or an `If-Match` header | 05 |

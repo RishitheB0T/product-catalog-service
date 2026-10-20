@@ -146,3 +146,44 @@ Concepts in the order we met them, each with small practice exercises.
 3. Why does the MySQL health check connect with `-h 127.0.0.1` inside the container, when the server runs right there?
 4. Delete `infra/.env` but keep the volume, then run `up`. What happens to the passwords, and why does MySQL ignore
    the new ones? (Recover with `.\scripts\dev-services.ps1 reset -Force`, which deletes the database.)
+
+<!-- BUILD FLOW 01.09.05 — Phase 04 -->
+## Phase 04 — Schema, entity, repository
+
+**Concepts**
+- **ORM, JPA, Hibernate.** An object-relational mapper turns rows into objects and changes into SQL. JPA is the
+  standard (the `jakarta.persistence` annotations); Hibernate is the implementation that does the work.
+- **Entity and persistence context.** Within one transaction Hibernate keeps one managed object per row. It notices
+  changed fields and writes them at *flush* time (dirty checking). `entityManager.clear()` forgets those objects, so
+  the next read really goes to the database.
+- **Migrations.** Versioned SQL files run once, in order, recorded in `flyway_schema_history` with a checksum. An
+  applied migration is never edited; a change gets a new file. `ddl-auto=validate` makes Hibernate check the result.
+- **Surrogate versus business key.** `id` is a meaningless number for joins and URLs; `sku` is the identifier
+  people use, protected by a unique constraint.
+- **Constraints in the database.** `NOT NULL`, `UNIQUE`, and `CHECK` hold for every client, including scripts and
+  bugs. Named constraints produce readable errors.
+- **Money.** `DECIMAL` and `BigDecimal` are exact; `DOUBLE` stores binary fractions and rounds.
+- **Time.** An `Instant` is a moment in UTC. Store UTC and convert only for display. `DATETIME` avoids `TIMESTAMP`'s
+  2038 limit.
+- **Optimistic locking.** The *lost update* problem: two people edit the same product and the second save silently
+  overwrites the first. `@Version` makes the second save fail instead, and the user can reload and retry.
+- **Repositories.** Spring Data generates the implementation of an interface. Method names such as `findBySku`
+  become queries; `Optional` says "may be absent".
+- **Dependency injection.** Spring creates *beans* and passes them to the constructors that need them. Classes
+  declare their dependencies instead of building them, which makes them easier to test and reconfigure.
+- **Profiles for beans.** `@Profile("dev")` decides whether a bean exists at all, not only which settings apply.
+- **Testcontainers.** Tests start a real MySQL in Docker; `@ServiceConnection` hands its address to Spring. A *slice*
+  test (`@DataJpaTest`) starts only the persistence layer and rolls back each test.
+- **Exception translation.** Spring converts database errors into its `DataAccessException` family, so code does not
+  depend on driver-specific exceptions. How well a given error is classified depends on the path (JDBC or JPA).
+- **Configuration from the environment.** `SPRING_DATASOURCE_URL` sets `spring.datasource.url`: production settings
+  come from the server's environment, not from files in the jar.
+
+**Exercises**
+1. Look at `flyway_schema_history`. Then change only a comment in `V1__create_product_table.sql` (don't commit) and
+   start the app. What does Flyway say, and why? Undo the change.
+2. Use the README's SQL command to insert a product with price `-5`. Which constraint stops it?
+3. In `ProductRepositoryTest`, what would `savesAndReloadsAProduct` prove if `entityManager.clear()` were removed?
+4. Why does `rejectsAnUpdateBasedOnAnOutdatedVersion` change the row with `JdbcTemplate` before saving the entity?
+5. Suppose `hibernate.jdbc.time_zone` were removed and the server ran in UTC while your laptop runs in IST. What
+   would happen to timestamps written by one and read by the other?

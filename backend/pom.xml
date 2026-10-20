@@ -98,6 +98,32 @@
 			<artifactId>spring-boot-starter-webmvc</artifactId>
 		</dependency>
 
+		<!-- BUILD FLOW 02.01.08 — Persistence (added in Phase 04)
+		     spring-boot-starter-data-jpa: JPA with Hibernate 7 as the implementation, Spring Data
+		     repositories, the HikariCP connection pool, and Spring's transaction support.
+		     spring-boot-starter-flyway: runs the versioned SQL migrations at startup, before Hibernate
+		     checks the schema. Versions come from the Spring Boot parent (Flyway 12.4.0). -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-data-jpa</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-flyway</artifactId>
+		</dependency>
+		<!-- Flyway's MySQL support is a separate module. Without it, Flyway refuses to work with MySQL. -->
+		<dependency>
+			<groupId>org.flywaydb</groupId>
+			<artifactId>flyway-mysql</artifactId>
+		</dependency>
+		<!-- The JDBC driver (Connector/J 9.7.0). Scope "runtime": our code never imports it; HikariCP
+		     and Hibernate load it, so it is left off the compile classpath. -->
+		<dependency>
+			<groupId>com.mysql</groupId>
+			<artifactId>mysql-connector-j</artifactId>
+			<scope>runtime</scope>
+		</dependency>
+
 		<!-- BUILD FLOW 02.01.06 — Test-only dependencies
 		     Scope "test" puts these on the test classpath only; they never ship inside the jar.
 		     Spring Boot 4 has one test starter per technology. Together they bring JUnit 6,
@@ -115,6 +141,32 @@
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-webmvc-test</artifactId>
+			<scope>test</scope>
+		</dependency>
+
+		<!-- BUILD FLOW 02.01.09 — Persistence test support (added in Phase 04)
+		     The JPA and Flyway test starters provide the @DataJpaTest slice (only the persistence
+		     beans, each test rolled back). spring-boot-testcontainers and testcontainers-mysql start a
+		     real MySQL 8.4 in Docker for the tests and hand its address to Spring (@ServiceConnection),
+		     so tests exercise the same database engine as development and production. -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-data-jpa-test</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-flyway-test</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-testcontainers</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.testcontainers</groupId>
+			<artifactId>testcontainers-mysql</artifactId>
 			<scope>test</scope>
 		</dependency>
 	</dependencies>

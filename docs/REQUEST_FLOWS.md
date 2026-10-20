@@ -42,7 +42,7 @@ readiness URL in Phase 14.
 | HEALTH-01 | Client (curl, a test, later Docker) | Sends `GET /actuator/health`, `/actuator/health/liveness`, or `/actuator/health/readiness` | 02 |
 | HEALTH-02 | Embedded Tomcat | Accepts the connection on the server port (8080 by default, `127.0.0.1:24081` with `dev`) and hands the request to a worker thread | 02 |
 | HEALTH-03 | Spring MVC `DispatcherServlet` | Finds the handler. Actuator's health endpoint is mapped because `exposure.include: health`. An unexposed endpoint such as `/actuator/env` has no handler → `404` | 02 |
-| HEALTH-04 | Actuator health endpoint | Asks each health indicator (diskSpace, ping, ssl, livenessState, readinessState; the database from Phase 04) and combines them: any `DOWN` makes the whole result `DOWN` | 02 |
+| HEALTH-04 | Actuator health endpoint | Asks each health indicator (diskSpace, ping, ssl, livenessState, readinessState, and since Phase 04 `db`, which checks that a pooled MySQL connection is valid) and combines them: any `DOWN` makes the whole result `DOWN` | 02 / 04 |
 | HEALTH-05 | Actuator → client | Applies `show-details` (`never` hides the components) and writes JSON. HTTP `200` for `UP`, `503` for `DOWN` | 02 |
 
 <!-- BUILD FLOW 01.07.02 — Flow 1: search -->

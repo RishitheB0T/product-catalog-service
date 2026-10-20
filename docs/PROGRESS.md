@@ -17,8 +17,8 @@ Runtime role: None. Documentation only.
 
 | Item | Value |
 |---|---|
-| Current phase | **03 — complete** |
-| Next phase | 04 — Flyway schema, product entity and repository, small demo fixture |
+| Current phase | **04 — complete** |
+| Next phase | 05 — DTOs, mapping, transactional CRUD API, consistent errors, server-side write switch |
 | Branch | `main`, tracking `origin/main` |
 | Repository | https://github.com/RishitheB0T/product-catalog-service (public) |
 | Last updated | 2026-10-20 |
@@ -30,7 +30,8 @@ Runtime role: None. Documentation only.
 | Phase 01 | `5be2fc3` | `docs: define catalog architecture and phased build plan` | Pushed and verified |
 | Between 01 and 02 | `225433f` | `docs: connect GitHub remote` | Pushed and verified |
 | Phase 02 | `ee94490` | `chore(backend): bootstrap Spring Boot application` | Pushed and verified |
-| Phase 03 | Recorded at the start of Phase 04 | `chore(infra): add local MySQL and Redis services` | Pushed and verified when committed |
+| Phase 03 | `71f067c` | `chore(infra): add local MySQL and Redis services` | Pushed and verified |
+| Phase 04 | Recorded at the start of Phase 05 | `feat(database): add product schema and persistence` | Pushed and verified when committed |
 
 <!-- BUILD FLOW 01.10.02 — Checks run in Phase 01 -->
 ## Checks run in Phase 01
@@ -80,6 +81,22 @@ All ran on 2026-10-20. Full details are in `BUILD_GUIDE.md`, Phase 03.
 - Network: 24081, 24306, and 24379 listen on `127.0.0.1` only; unreachable through the LAN address.
 - Backend: `clean verify` 6/6 tests; dev run on `127.0.0.1:24081`; DEBUG logging for `com.example.catalog` active.
 
+<!-- BUILD FLOW 01.10.08 — Checks run in Phase 04 -->
+## Checks run in Phase 04
+
+All ran on 2026-10-20. Full details, including the first run's six failures, are in `BUILD_GUIDE.md`, Phase 04.
+- `.\mvnw.cmd clean verify`: 21 tests, 0 failures, against one shared `mysql:8.4.11` test container.
+- Dev profile against the Compose MySQL: Flyway applied V1, Hibernate validated the schema, 24 demo products loaded,
+  health `db` UP. A second start migrated nothing and loaded nothing.
+- Database inspection: the named constraints, only the primary-key and SKU indexes, UTC timestamps.
+- Packaged jar with `prod` and `SPRING_DATASOURCE_*` environment variables: starts, no details, no demo data.
+
+**Carry-forward items**
+- The JDK warning about a dynamically loaded agent (Mockito) is still open; configure it in Phase 05.
+- Plain `JdbcTemplate` reports MySQL CHECK violations (error 3819) as `UncategorizedSQLException`; repository (JPA)
+  calls get `DataIntegrityViolationException`. Map the latter in Phase 05; remember the former if raw JDBC writes appear.
+- Maven prints two HTTP 401 warnings for repositories declared in Flyway's parent POM; all jars come from Maven Central.
+
 <!-- BUILD FLOW 01.10.03 — Environment -->
 ## Environment (inspected 2026-10-20)
 
@@ -95,6 +112,7 @@ All ran on 2026-10-20. Full details are in `BUILD_GUIDE.md`, Phase 03.
 | Maven | 3.10.0 through the wrapper (downloaded to the user's `.m2` folder on 2026-10-20; checksum-verified) |
 | Ports | This project uses the 24xxx block on `127.0.0.1` (README "Ports"). At inspection, 8080, 5432, and 9090 were in use by other programs |
 | Local containers | `product-catalog-dev-mysql-1` and `product-catalog-dev-redis-1`; together about 430 MiB of memory while running |
+| Test containers | One shared `mysql:8.4.11` container per test run (about 400 MB) plus Testcontainers' cleanup container; Docker must be running |
 | Not installed | k6 (planned to run from Docker), AWS CLI (decided in Phase 15) |
 
 <!-- BUILD FLOW 01.10.04 — Blockers and pending items -->
@@ -105,18 +123,18 @@ All ran on 2026-10-20. Full details are in `BUILD_GUIDE.md`, Phase 03.
 | GitHub repository and sign-in | — | Done on 2026-10-20: public repository created with the GitHub CLI; pushes verified |
 | `workflow` token scope for pushing CI files | Phase 14 | Pending. The current tokens are not known to include `workflow`, which GitHub requires for pushing files under `.github/workflows/`. Plan: `gh auth refresh -s workflow` when needed |
 | AWS account access and approval of instance, region, and cost | Phase 15 | Pending |
-| Anything blocking Phase 04 | — | None (Docker Desktop must be running) |
+| Anything blocking Phase 05 | — | None (Docker Desktop must be running for the tests and the dev database) |
 
 <!-- BUILD FLOW 01.10.05 — Next action -->
 ## Next action
 
-Next: Phase 04.
-1. Record Phase 03's commit hash in the commits table above.
+Next: Phase 05.
+1. Record Phase 04's commit hash in the commits table above.
 2. Start the services: `.\scripts\dev-services.ps1 up`.
-3. Add Spring Data JPA, Flyway with `flyway-mysql`, MySQL Connector/J, and Testcontainers (re-check the versions
-   Spring Boot manages). Write the `V1` migration, the `Category` enum, the `Product` entity, and `ProductRepository`;
-   set `ddl-auto=validate`; point the dev profile at `127.0.0.1:24306` with the credentials from `infra/.env`; add a
-   small dev-only demo fixture.
-4. Tests against a real MySQL 8.4.11 through Testcontainers: migrations apply, Hibernate validates the schema, and
-   database constraints reject bad rows.
-5. Commit `feat(database): add product schema and persistence`, push, and verify on GitHub.
+3. Request and response DTOs (records) with Bean Validation, an explicit mapper, `ProductService` with
+   `@Transactional` boundaries, and `ProductController` for `GET /api/v1/products/{id}`, `POST`, `PUT`, `DELETE`.
+4. One consistent error body (decide: `ProblemDetail` or a custom record): field errors, 404, and 409 for
+   `uk_product_sku` and optimistic-lock conflicts. Decide how the client sends the expected version.
+5. Server-side write switch (off in production configuration) and its status code; configure the Mockito agent.
+6. Focused tests (web slice and service), then manual CRUD with `curl.exe` on `127.0.0.1:24081`.
+7. Commit `feat(api): implement product CRUD operations`, push, and verify on GitHub.

@@ -5,7 +5,8 @@
  *          configuration (base, dev, prod) exposes exactly the operational information we intend.
  * Depends on: CatalogApplication (02.05); application.yml, application-dev.yml and
  *             application-prod.yml (02.06 to 02.08); JUnit 6, AssertJ and Spring Boot's test
- *             support from the test starters in pom.xml; the JDK's built-in java.net.http.HttpClient.
+ *             support from the test starters in pom.xml; the JDK's built-in java.net.http.HttpClient;
+ *             since Phase 04, TestcontainersConfiguration (04.07) for the database every context now needs.
  * Called by: Maven Surefire during .\mvnw.cmd test or verify (and by CI from Phase 14).
  * Runtime role: Test only. Test classes are never packaged into the application jar.
  */
@@ -24,12 +25,15 @@ import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.SpringBootTest.WebEnvironment;
 import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.context.annotation.Import;
 import org.springframework.test.context.ActiveProfiles;
 
 // BUILD FLOW 02.09.01 — One outer class, one nested class per configuration
 // @Nested (from JUnit) marks an inner class whose tests run as a group. Each nested class below
 // carries its own @SpringBootTest, so Spring starts a separate application for each: one with no
 // profile, one with "dev", one with "prod". The same HTTP request is checked against all three.
+// Since Phase 04 the application needs a database to start, so each nested class also imports the
+// shared MySQL test container (@Import(TestcontainersConfiguration.class)); health then includes "db".
 class HealthEndpointTest {
 
     // BUILD FLOW 02.09.02 — A small HTTP helper using the JDK's own client
@@ -51,6 +55,7 @@ class HealthEndpointTest {
     // so tests never collide with an application already running on 8080 or 8081.
     @Nested
     @SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT)
+    @Import(TestcontainersConfiguration.class)
     class BaseConfiguration {
 
         // Spring injects the port Tomcat actually received.
@@ -97,6 +102,7 @@ class HealthEndpointTest {
     @Nested
     @SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT)
     @ActiveProfiles("dev")
+    @Import(TestcontainersConfiguration.class)
     class DevProfile {
 
         @LocalServerPort
@@ -116,6 +122,7 @@ class HealthEndpointTest {
     @Nested
     @SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT)
     @ActiveProfiles("prod")
+    @Import(TestcontainersConfiguration.class)
     class ProdProfile {
 
         @LocalServerPort

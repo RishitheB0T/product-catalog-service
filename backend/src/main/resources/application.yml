@@ -21,6 +21,29 @@ spring:
     # Appears in log lines and, later, in metrics as the service name.
     name: catalog
 
+  # BUILD FLOW 02.06.03 — JPA and Hibernate (added in Phase 04)
+  # No database address here: each environment supplies its own (the dev profile, the test containers, and
+  # environment variables in production from Phase 14). Without one, the application refuses to start.
+  jpa:
+    # Open Session in View keeps a database session open until the HTTP response is written, so missing data can
+    # still be loaded while JSON is rendered. That hides queries and holds connections longer, so it is off: the
+    # service layer loads everything a response needs inside its own transaction (Phase 05).
+    open-in-view: false
+    hibernate:
+      # Flyway creates and changes the schema; Hibernate only checks that the entities match it and stops the
+      # application on a mismatch. "update" would let Hibernate alter tables by itself: never in production.
+      ddl-auto: validate
+    properties:
+      hibernate:
+        # Read and write date-times in UTC whatever time zone the JVM runs in (this laptop runs in IST).
+        jdbc:
+          time_zone: UTC
+
+  # BUILD FLOW 02.06.04 — Flyway (added in Phase 04)
+  flyway:
+    # Where the versioned migrations live. This is Flyway's default, written down to make it visible.
+    locations: classpath:db/migration
+
 # BUILD FLOW 02.06.02 — Actuator: expose only the health endpoint over HTTP
 # Actuator offers many endpoints (env, beans, configprops, heapdump, ...). Several reveal
 # internals such as configuration values or memory contents, so HTTP exposure is limited to

@@ -14,9 +14,9 @@ A product catalog built from an empty folder in documented phases, with every fi
 **Spring Boot** REST API over **MySQL**, **Redis** caching for product details, and a **React** storefront that
 uses the real API.
 
-> **Status: Phase 03 of 16 complete.** The backend skeleton builds, passes its tests, and answers health checks,
-> and MySQL and Redis run locally in Docker. There are no catalog features yet. This README always describes what
-> actually works; anything not built yet is labeled *planned*.
+> **Status: Phase 04 of 16 complete.** The backend starts against MySQL, Flyway creates the product schema, and
+> the dev profile loads a 24-product demo catalog. There is no HTTP API for products yet (Phase 05). This README
+> always describes what actually works; anything not built yet is labeled *planned*.
 
 <!-- BUILD FLOW 01.04.01 — What works today -->
 ## What works today
@@ -26,8 +26,9 @@ uses the real API.
 | Plan, architecture, verified version baseline | Done (Phase 01) |
 | Spring Boot skeleton: build, tests, profiles, health check | Done (Phase 02) |
 | Local MySQL 8.4 and Redis 8.10 in Docker Compose, with a one-command helper | Done (Phase 03) |
-| Spring Boot API: CRUD, search, validation, errors | Planned (Phases 04–07) |
-| MySQL schema and measured query optimization | Planned (Phases 04 and 08) |
+| Product schema (Flyway), JPA entity and repository, dev demo catalog, tests on real MySQL | Done (Phase 04) |
+| Spring Boot API: CRUD, search, validation, errors | Planned (Phases 05–07) |
+| Measured query optimization | Planned (Phase 08) |
 | Redis product-detail cache | Planned (Phases 09–10) |
 | Benchmarks and performance report | Planned (Phase 11) |
 | React storefront and local admin | Planned (Phases 12–13) |
@@ -141,33 +142,54 @@ cd backend
 curl.exe http://localhost:24081/actuator/health
 ```
 
-You should see `"status":"UP"` together with component details, which only the dev profile shows. Stop the app with
-Ctrl+C. The backend does not use MySQL or Redis yet: it connects to MySQL from Phase 04 and to Redis from Phase 09.
+You should see `"status":"UP"` together with component details, including `db` (MySQL), which only the dev profile
+shows. On the first start Flyway creates the product table, and the dev profile loads 24 demo products (log line
+`Loaded 24 demo products`). Stop the app with Ctrl+C. Redis is used from Phase 09.
 
 - Keep the quotes around `-Dspring-boot.run.profiles=dev`. Windows PowerShell splits an unquoted argument like
   this at its first dot, so Maven would receive the wrong setting.
+- The backend reads the database password from `infra/.env`, so step 1 must have run at least once.
 
-Production-style run of the packaged jar (prod profile: no health details, no banner):
+**4. Look at the data** (the SQL goes in through standard input, which avoids Windows PowerShell's quoting problems):
+
+```powershell
+"SELECT sku, name, category, price, stock_quantity FROM product LIMIT 5;" | docker compose --env-file infra\.env -f infra\compose.dev.yaml exec -T mysql sh -c 'MYSQL_PWD=$MYSQL_PASSWORD mysql -u $MYSQL_USER $MYSQL_DATABASE --table'
+```
+
+**Production-style run of the packaged jar.** The `prod` profile contains no database settings on purpose: a server
+supplies them as environment variables, which Spring Boot maps onto its properties (`SPRING_DATASOURCE_URL` becomes
+`spring.datasource.url`). Here they point at the local MySQL container:
 
 ```powershell
 cd backend
 .\mvnw.cmd clean verify
+$env:SPRING_DATASOURCE_URL = "jdbc:mysql://127.0.0.1:24306/catalog?connectionTimeZone=UTC"
+$env:SPRING_DATASOURCE_USERNAME = "catalog"
+$env:SPRING_DATASOURCE_PASSWORD = (Select-String -LiteralPath ..\infra\.env -Pattern '^MYSQL_PASSWORD=(.*)$').Matches[0].Groups[1].Value
 java -jar target\catalog-0.0.1-SNAPSHOT.jar --spring.profiles.active=prod --server.port=24082 --server.address=127.0.0.1
 ```
 
-Without the last two options the jar would listen on Spring Boot's default, port 8080 on every network interface,
-which suits a container but not a shared development machine.
+Expected: health without component details, no banner, and no demo data. The `$env:` variables last until you close
+that terminal. Without the last two options the jar would listen on Spring Boot's default, port 8080 on every network
+interface, which suits a container but not a shared development machine.
 
 ## Tests
+
+Docker Desktop must be running: the tests start their own MySQL 8.4.11 container through Testcontainers, separate
+from the development database.
 
 ```powershell
 cd backend
 .\mvnw.cmd verify
 ```
 
-Phase 02 has 6 tests in `HealthEndpointTest`. They start the real application three times (no profile, `dev`, and
-`prod`) and call it over HTTP. They check that health is UP, that component details appear only with `dev`, that the
-liveness and readiness probes answer, and that internal endpoints such as `/actuator/env` return 404.
+21 tests in three classes:
+- `HealthEndpointTest` (6) starts the real application with no profile, `dev`, and `prod`, and checks over HTTP that
+  health is UP, that details appear only with `dev`, that the probes answer, and that `/actuator/env` returns 404.
+- `ProductRepositoryTest` (13) runs against real MySQL: products round-trip, timestamps are stored in UTC, duplicate
+  SKUs and six kinds of invalid rows are rejected by the database itself, and optimistic locking refuses an update
+  based on an outdated version.
+- `DemoDataLoaderTest` (2) checks that the demo catalog loads only with `dev`, only into an empty table, and only once.
 
 ## Performance evidence
 

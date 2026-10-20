@@ -480,8 +480,8 @@ their phase, or changed with a `DECISIONS.md` entry.
 - Write the `V1` migration (primary key, unique SKU, `NOT NULL`, non-negative price and stock, category allowlist,
   lengths, timestamps, version), the `Category` enum, the `Product` entity (no Lombok), and `ProductRepository`.
   Set `ddl-auto=validate`.
-- Add a small demo fixture (about 24–36 products) applied only under the dev profile (planned: a Flyway location
-  enabled only in `dev`).
+- Add a small demo fixture (about 24–36 products) applied only under the dev profile. Built as a dev-only loader
+  that fills an empty table, not as a Flyway migration (decision D-022).
 - Checks: Testcontainers repository tests (migration, schema validation, constraint violations), the application
   starting against Compose MySQL, and an inspection of `flyway_schema_history`.
 

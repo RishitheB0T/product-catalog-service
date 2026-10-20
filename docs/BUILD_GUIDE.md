@@ -304,3 +304,96 @@ dev-services.ps1 up ──creates──► infra/.env (random passwords, git-ign
          └─ redis  (memory only, 128 MB, LRU eviction)          ◄── 127.0.0.1:24379
 backend (dev profile) on 127.0.0.1:24081 ──► uses MySQL from Phase 04 and Redis from Phase 09
 ```
+
+<!-- BUILD FLOW 01.05.06 — Phase 04 -->
+## Phase 04 — Schema, entity, repository, and demo data
+
+**What we had before.** A backend that started without a database, and MySQL and Redis containers that nothing used yet.
+
+**What we add.** The persistence layer: a Flyway migration that creates the `product` table with rules the database
+enforces itself, the `Category` enum, the `Product` entity, `ProductRepository`, a dev-only demo catalog, and tests
+that run against a real MySQL 8.4.11 in Docker. From now on the application connects to MySQL when it starts.
+
+**Why.** Everything later (CRUD, search, caching) reads and writes this table. Getting the schema, its constraints,
+time handling, and optimistic locking right, and proving them, keeps the later phases simpler.
+
+**Files in order**
+
+| BUILD FLOW | File | Role |
+|---|---|---|
+| 04.01 | `backend/src/main/resources/db/migration/V1__create_product_table.sql` | The table and its rules |
+| 04.02 | `backend/src/main/java/com/example/catalog/product/Category.java` | The six categories |
+| 04.03 | `backend/src/main/java/com/example/catalog/product/Product.java` | JPA entity |
+| 04.04 | `backend/src/main/java/com/example/catalog/product/ProductRepository.java` | Spring Data repository |
+| 04.05 | `backend/src/main/resources/db/demo/demo-products.sql` | 24 demo products |
+| 04.06 | `backend/src/main/java/com/example/catalog/demo/DemoDataLoader.java` | Dev-only loader |
+| 04.07 | `backend/src/test/java/com/example/catalog/TestcontainersConfiguration.java` | Shared MySQL test container |
+| 04.08 | `backend/src/test/java/com/example/catalog/product/ProductRepositoryTest.java` | Persistence tests |
+| 04.09 | `backend/src/test/java/com/example/catalog/demo/DemoDataLoaderTest.java` | Demo-data tests |
+
+Modified: `pom.xml` (02.01: persistence and Testcontainers dependencies, sections 02.01.08–09), `application.yml`
+(02.06: JPA and Flyway settings, sections 02.06.03–04), `application-dev.yml` (02.07: the MySQL connection, section
+02.07.04), and `HealthEndpointTest.java` (02.09: each configuration imports the test container).
+
+**Relevant syntax**
+- *SQL DDL*: `CREATE TABLE`, column types, `NOT NULL`, expression defaults `DEFAULT (UTC_TIMESTAMP(6))`, `PRIMARY KEY`,
+  named `CONSTRAINT … UNIQUE` / `CHECK`, `REGEXP_LIKE(…, 'c')` for a case-sensitive pattern, and `ENGINE` / `CHARSET` / `COLLATE`.
+- *Flyway file names*: `V1__create_product_table.sql`, meaning version 1, two underscores, then a description.
+- *JPA*: `@Entity`, `@Table`, `@Id`, `@GeneratedValue(IDENTITY)`, `@Column`, `@Enumerated(STRING)`, `@Version`,
+  `@PrePersist`, `@PreUpdate`.
+- *Spring Data*: `interface ProductRepository extends JpaRepository<Product, Long>` and the derived query
+  `Optional<Product> findBySku(String sku)`.
+- *Spring*: `@Component`, `@Profile("dev")`, `ApplicationRunner`, constructor injection.
+- *Configuration*: `spring.config.import: optional:file:../infra/.env[.properties]`, `${NAME:default}`, and environment
+  variables such as `SPRING_DATASOURCE_URL` mapping onto `spring.datasource.url`.
+- *Tests*: `@DataJpaTest`, `@AutoConfigureTestDatabase(replace = NONE)`, `@TestConfiguration`, `@Import`,
+  `@ServiceConnection`, `@ParameterizedTest` with a `@CsvSource` text block, and AssertJ's `assertThatThrownBy(…).rootCause()`.
+
+**Commands we ran** (PowerShell)
+
+| Command | Purpose |
+|---|---|
+| start.spring.io metadata check | Confirm Spring Boot 4.1.1 is still the current GA release |
+| `.\scripts\dev-services.ps1 up` | Start MySQL and Redis |
+| `.\mvnw.cmd dependency:build-classpath` (test scope), then a search of the jars | Find where Boot 4 moved the test annotations (for example `@DataJpaTest`) |
+| `.\mvnw.cmd -B -ntp clean verify` (twice) | Build and run every test against a real MySQL test container |
+| `.\mvnw.cmd spring-boot:run "-Dspring-boot.run.profiles=dev"` (twice) | Migrate the development database and load the demo data, then confirm nothing runs twice |
+| SQL piped into `docker compose … exec -T mysql` | Inspect `flyway_schema_history`, constraints, indexes, demo rows, and stored timestamps |
+| `java -jar … --spring.profiles.active=prod` with `SPRING_DATASOURCE_*` variables | Production-style run of the packaged jar |
+
+**Expected behavior.** Flyway creates the table once; Hibernate's validation passes; invalid rows are rejected by MySQL
+itself; timestamps are stored in UTC; demo data appears only with `dev`, only once; the jar runs with `prod` when the
+database settings come from environment variables.
+
+**Actual checks** (2026-10-20)
+
+| Check | Result |
+|---|---|
+| Versions | Spring Boot 4.1.1 still the GA release. Resolved: Hibernate 7.4.5, Flyway 12.4.0, Connector/J 9.7.0, Testcontainers 2.0.5, HikariCP 7.0.2 |
+| First `clean verify` | 15 of 21 passed. The 6 failures were the CHECK-constraint cases: MySQL rejected every row with the right constraint (error 3819), but `JdbcTemplate` reported `UncategorizedSQLException`, not `DataIntegrityViolationException`. The tests now assert the actual behavior, and a new test shows that the JPA path does produce `DataIntegrityViolationException` |
+| Second `clean verify` | 21 tests, 0 failures; one MySQL container served all six Spring test contexts |
+| First dev run | Flyway applied V1 in 43 ms; Hibernate validated the schema; started in 5.4 s; 24 demo products loaded; health `db` UP (MySQL) |
+| Second dev run | "Schema `catalog` is up to date"; "Demo data not loaded: the product table already has 24 rows"; still 24 rows |
+| Database inspection | `flyway_schema_history`: V1 succeeded, checksum recorded. Constraints: 6 CHECK, PRIMARY, `uk_product_sku`. Indexes: only PRIMARY and `uk_product_sku`. Four products per category, two out of stock. A stored `created_at` was exactly 5 h 30 min behind the IST wall clock, so it is UTC |
+| Packaged jar | Contains the three YAML files, the V1 migration, the demo SQL, the MySQL driver, and `flyway-mysql`; no test libraries |
+| Production-style run | `prod` profile with the database from environment variables only; Flyway up to date; health without details; no demo data; no banner |
+
+Findings:
+- **How constraint errors surface.** Spring's built-in table of MySQL error codes lacks 3819, so plain `JdbcTemplate`
+  reports a CHECK violation as a generic `UncategorizedSQLException`. Hibernate's MySQL dialect recognises it, so
+  repository calls get `DataIntegrityViolationException`. Phase 05 maps the latter, because the API writes through JPA.
+- **Maven 401 warnings.** Flyway's parent build file (`flyway-parent-12.4.0.pom`) declares two extra repositories, a
+  GitHub Packages feed and a Redgate feed, that require login. Maven tried them, got HTTP 401, and resolved everything
+  from Maven Central; the `_remote.repositories` records show `central` for each jar. Harmless, but a reminder that
+  dependencies can add download sources.
+- **Boot 4 moved test annotations**, for example `org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest`.
+  Older tutorials show the Boot 3 packages.
+
+**How the pieces connect**
+
+```text
+startup ─► Flyway runs db/migration/V1 (once) ─► Hibernate validates Product against the table ─► Tomcat starts
+        └► with the dev profile: DemoDataLoader fills an empty table from db/demo/demo-products.sql
+ProductRepository (interface) ─► implementation generated by Spring Data ─► Hibernate ─► HikariCP pool ─► MySQL
+tests ─► TestcontainersConfiguration (one mysql:8.4.11) ─► @ServiceConnection ─► the same startup path
+```
