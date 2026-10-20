@@ -25,22 +25,22 @@ Step IDs describe **runtime order**, not file-creation order (see "Two numbering
 <!-- BUILD FLOW 01.07.01 — Where requests travel -->
 ## Where requests travel (planned)
 
-- **Development (Phases 03–13):** browser → Vite dev server on `localhost:5173` → proxies `/api` → Spring Boot on
-  `localhost:8081` (running directly on Windows with the `dev` profile; 8080 is occupied on the development machine)
-  → MySQL and Redis containers through ports bound to `127.0.0.1`.
+- **Development (Phases 03–13):** browser → Vite dev server on `localhost:24173` → proxies `/api` → Spring Boot on
+  `127.0.0.1:24081` (running directly on Windows with the `dev` profile) → MySQL on `127.0.0.1:24306` and Redis on
+  `127.0.0.1:24379`, both in Docker containers. Port choices: README "Ports".
 - **Production-style (Phase 14 onwards):** browser → Nginx (the only published port) → `app:8080` on the Compose
   network → `mysql:3306` and `redis:6379`, reached by service name. The database and cache cannot be reached from outside.
 
 <!-- BUILD FLOW 01.07.06 — Flow 0: health check (added in Phase 02) -->
 ## Flow 0 — Health check (implemented in Phase 02)
 
-Example: `curl.exe http://localhost:8081/actuator/health` (dev profile). Docker health checks will call the
+Example: `curl.exe http://localhost:24081/actuator/health` (dev profile). Docker health checks will call the
 readiness URL in Phase 14.
 
 | Step | Where | What happens | Phase |
 |---|---|---|---|
 | HEALTH-01 | Client (curl, a test, later Docker) | Sends `GET /actuator/health`, `/actuator/health/liveness`, or `/actuator/health/readiness` | 02 |
-| HEALTH-02 | Embedded Tomcat | Accepts the connection on the server port (8080 by default, 8081 with `dev`) and hands the request to a worker thread | 02 |
+| HEALTH-02 | Embedded Tomcat | Accepts the connection on the server port (8080 by default, `127.0.0.1:24081` with `dev`) and hands the request to a worker thread | 02 |
 | HEALTH-03 | Spring MVC `DispatcherServlet` | Finds the handler. Actuator's health endpoint is mapped because `exposure.include: health`. An unexposed endpoint such as `/actuator/env` has no handler → `404` | 02 |
 | HEALTH-04 | Actuator health endpoint | Asks each health indicator (diskSpace, ping, ssl, livenessState, readinessState; the database from Phase 04) and combines them: any `DOWN` makes the whole result `DOWN` | 02 |
 | HEALTH-05 | Actuator → client | Applies `show-details` (`never` hides the components) and writes JSON. HTTP `200` for `UP`, `503` for `DOWN` | 02 |

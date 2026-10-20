@@ -139,12 +139,54 @@ history, with a pointer to its replacement).
   Actuator, and the configuration files together.
 - **Revisit:** the API tests in Phases 05–07 need JSON assertions and may use `RestTestClient` or MockMvc.
 
-## D-015 · Local development port 8081 — Accepted (Phase 02)
+## D-015 · Local development port 8081 — Superseded by D-016 (Phase 03)
 
 - **Context:** another program listens on port 8080 on the development machine.
-- **Decision:** the `dev` profile sets `server.port: 8081`. The base and `prod` settings keep Spring Boot's
-  default 8080, which is safe inside containers because each container has its own network namespace.
-- **Trade-off:** local tools must point at 8081, including the Vite dev proxy in Phase 12.
+- **Decision (Phase 02):** the `dev` profile sets `server.port: 8081`. The base and `prod` settings keep Spring
+  Boot's default 8080, which is safe inside containers because each container has its own network namespace.
+- **Why superseded:** 8081 is itself a common default in other projects; see D-016.
+
+## D-016 · A project-specific block of host ports (24xxx), loopback only — Accepted (Phase 03)
+
+- **Context:** several projects run on the development machine. At inspection, 8080, 5432, and 9090 were already
+  taken, and another project's MySQL container was configured for 3306.
+- **Decision:** every host port this project uses comes from the 24xxx block, `24` followed by the last three digits of
+  the usual port: backend 24081, MySQL 24306, Redis 24379, Vite 24173 (Phase 12), production-style site 24080
+  (Phase 14). Local services listen on `127.0.0.1` only, including the dev backend (`server.address`).
+- **How the block was checked:** none of the five ports was in use, none falls inside Windows' reserved port ranges
+  (`netsh interface ipv4 show excludedportrange protocol=tcp`), and none appears in the other projects' configuration files.
+- **Trade-off:** non-standard ports must be documented (README "Ports") and typed explicitly. Inside containers the
+  usual ports stay (3306, 6379, 8080), because containers cannot collide there.
+
+## D-017 · Local services through Docker Compose — Accepted (Phase 03)
+
+- **Decision:** `infra/compose.dev.yaml` runs MySQL and Redis with exact image tags, health checks, a named MySQL
+  volume, and an explicit Compose project name (`product-catalog-dev`). `scripts/dev-services.ps1` wraps the
+  commands for Windows.
+- **Why the project name:** Compose prefixes container, network, and volume names with it. The default would be the
+  folder name, `infra`, which other projects could share, and then they would manage each other's containers.
+- **Alternatives:** installing MySQL and Redis directly on Windows (version drift, harder to reset); Spring Boot's
+  Docker Compose integration, which starts containers automatically (convenient, but hides the steps this project
+  wants to show).
+
+## D-018 · Random local passwords, never committed — Accepted (Phase 03)
+
+- **Decision:** the first `dev-services.ps1 up` copies `infra/.env.example` to the git-ignored `infra/.env` and
+  replaces each placeholder with a 24-character password from .NET's cryptographic random generator, without modulo
+  bias. Inside the container, health checks pass the password through the `MYSQL_PWD` variable, never the command line.
+- **Alternative:** a fixed default such as `catalog/catalog` in the template. That is simpler, but identical on every
+  machine and easy to copy into a real deployment by mistake.
+- **Trade-off:** the passwords exist only in `infra/.env`. Deleting that file while keeping the MySQL volume leaves
+  a database whose passwords are unknown; `dev-services.ps1 reset -Force` then starts over.
+
+## D-019 · Redis in development is a pure cache — Accepted (Phase 03)
+
+- **Decision:** no RDB snapshots and no append-only file (`--save ""`, `--appendonly no`), a 128 MB memory cap with
+  `allkeys-lru` eviction, and no password locally, because the port is loopback-only and holds only public catalog data.
+- **Why:** everything in the cache can be rebuilt from MySQL, so persistence would only cost disk writes, and a cap
+  keeps memory predictable on a busy laptop.
+- **Revisit:** Phase 14 decides authentication and memory settings for the production stack, where Redis is not
+  published on any host port.
 
 <!-- BUILD FLOW 01.08.03 — Open questions -->
 ## Open questions (each is decided in its phase)

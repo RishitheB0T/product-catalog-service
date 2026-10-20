@@ -14,9 +14,9 @@ A product catalog built from an empty folder in documented phases, with every fi
 **Spring Boot** REST API over **MySQL**, **Redis** caching for product details, and a **React** storefront that
 uses the real API.
 
-> **Status: Phase 02 of 16 complete.** The backend skeleton builds, passes its tests, and answers health checks.
-> There are no catalog features yet. This README always describes what actually works; anything not built yet is
-> labeled *planned*.
+> **Status: Phase 03 of 16 complete.** The backend skeleton builds, passes its tests, and answers health checks,
+> and MySQL and Redis run locally in Docker. There are no catalog features yet. This README always describes what
+> actually works; anything not built yet is labeled *planned*.
 
 <!-- BUILD FLOW 01.04.01 — What works today -->
 ## What works today
@@ -25,6 +25,7 @@ uses the real API.
 |---|---|
 | Plan, architecture, verified version baseline | Done (Phase 01) |
 | Spring Boot skeleton: build, tests, profiles, health check | Done (Phase 02) |
+| Local MySQL 8.4 and Redis 8.10 in Docker Compose, with a one-command helper | Done (Phase 03) |
 | Spring Boot API: CRUD, search, validation, errors | Planned (Phases 04–07) |
 | MySQL schema and measured query optimization | Planned (Phases 04 and 08) |
 | Redis product-detail cache | Planned (Phases 09–10) |
@@ -95,37 +96,67 @@ GitHub Actions. The exact versions, verified against official sources on 2026-10
 | Maven | **Not required.** The Maven Wrapper (`mvnw.cmd`) downloads the pinned version | — |
 | k6 | Benchmarks | Planned to run from its Docker image, so nothing to install |
 
-<!-- BUILD FLOW 01.04.06 — Running, testing, evidence, deployment -->
-## Quick start (backend only, so far)
+<!-- BUILD FLOW 01.04.08 — Ports (added in Phase 03) -->
+## Ports
 
-Run these in PowerShell from the repository root. You need JDK 21; the first run downloads Maven and the libraries.
+The development machine runs several projects, so this one never binds framework defaults (8080, 3306, 6379,
+5173, 80) on the host. It uses its own **24xxx** block: `24` followed by the last three digits of the usual port.
+Local services listen on `127.0.0.1` only, so other devices on the network cannot reach them.
+
+| Service | Host address | Inside its container | Since |
+|---|---|---|---|
+| Backend, `dev` profile | `127.0.0.1:24081` | — (runs directly on Windows) | Phase 03 |
+| Backend jar, manual production-style run | `127.0.0.1:24082` (passed on the command line) | — | Phase 03 |
+| MySQL 8.4 | `127.0.0.1:24306` | 3306 | Phase 03 |
+| Redis 8.10 | `127.0.0.1:24379` | 6379 | Phase 03 |
+| Vite dev server | 24173 (planned) | — | Phase 12 |
+| Production-style stack through Nginx | 24080 (planned) | 80 | Phase 14 |
+
+<!-- BUILD FLOW 01.04.06 — Running, testing, evidence, deployment -->
+## Quick start
+
+Run these in PowerShell from the repository root. You need JDK 21 and Docker Desktop (running). The first runs
+download Maven, the Java libraries, and the two container images.
+
+**1. Start MySQL and Redis.** The first `up` creates `infra/.env` with new random passwords (git-ignored) and waits
+until both containers report healthy.
+
+```powershell
+.\scripts\dev-services.ps1 up
+```
+
+Other actions: `status`, `logs`, `down` (stops and removes the containers; the database volume is kept), and
+`reset -Force` (also deletes the database volume).
+
+**2. Run the backend** with the dev profile:
 
 ```powershell
 cd backend
 .\mvnw.cmd spring-boot:run "-Dspring-boot.run.profiles=dev"
 ```
 
-Then, in a second terminal:
+**3. Check it** from a second terminal:
 
 ```powershell
-curl.exe http://localhost:8081/actuator/health
+curl.exe http://localhost:24081/actuator/health
 ```
 
-You should see `"status":"UP"` together with component details, which only the dev profile shows. Stop the app with Ctrl+C.
+You should see `"status":"UP"` together with component details, which only the dev profile shows. Stop the app with
+Ctrl+C. The backend does not use MySQL or Redis yet: it connects to MySQL from Phase 04 and to Redis from Phase 09.
 
 - Keep the quotes around `-Dspring-boot.run.profiles=dev`. Windows PowerShell splits an unquoted argument like
   this at its first dot, so Maven would receive the wrong setting.
-- The dev profile uses port **8081** because another program occupies 8080 on the development machine.
 
 Production-style run of the packaged jar (prod profile: no health details, no banner):
 
 ```powershell
 cd backend
 .\mvnw.cmd clean verify
-java -jar target\catalog-0.0.1-SNAPSHOT.jar --spring.profiles.active=prod
+java -jar target\catalog-0.0.1-SNAPSHOT.jar --spring.profiles.active=prod --server.port=24082 --server.address=127.0.0.1
 ```
 
-The jar listens on port 8080 unless you add `--server.port=<port>`.
+Without the last two options the jar would listen on Spring Boot's default, port 8080 on every network interface,
+which suits a container but not a shared development machine.
 
 ## Tests
 

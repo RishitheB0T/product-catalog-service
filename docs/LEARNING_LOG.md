@@ -103,10 +103,46 @@ Concepts in the order we met them, each with small practice exercises.
 - **Quoting in PowerShell.** `"-Dspring-boot.run.profiles=dev"` needs quotes; YAML needs quotes around `"off"`.
 
 **Exercises**
-1. Run the app with the dev profile and open http://localhost:8081/actuator/health in a browser. Find the
-   disk-space path. Explain in one sentence why production hides it.
+1. Run the app with the dev profile and open http://localhost:24081/actuator/health in a browser (the port moved
+   from 8081 to 24081 in Phase 03). Find the disk-space path. Explain in one sentence why production hides it.
 2. Temporarily change `show-details: never` to `always` in `application-prod.yml` and run `.\mvnw.cmd verify`.
    Which test fails, and why is that failure a good thing? Then undo the change.
-3. Run the jar with `--spring.profiles.active=prod --server.port=8082`. Which log line proves the profile, and what
+3. Run the jar with `--spring.profiles.active=prod --server.port=24082`. Which log line proves the profile, and what
    is missing from the top of the log compared with a run without a profile?
 4. Why does `mvnw` need Git's executable bit while `mvnw.cmd` does not?
+
+<!-- BUILD FLOW 01.09.04 — Phase 03 -->
+## Phase 03 — Containers for MySQL and Redis
+
+**Concepts**
+- **Image versus container.** An image is a read-only template (`mysql:8.4.11`). A container is a running instance
+  of it, with its own process, network address, and file changes. Deleting a container does not delete the image.
+- **Compose.** One YAML file describes containers that belong together. `up -d` starts them in the background and
+  `down` removes them. The *project name* keeps one project's containers, networks, and volumes apart from another's.
+- **Port publishing.** Containers sit on their own private network. `"127.0.0.1:24306:3306"` forwards this
+  computer's port 24306 to port 3306 inside the container, on the loopback address only.
+- **Loopback.** `127.0.0.1` (the name `localhost`) is the computer talking to itself; other devices cannot connect.
+- **Volumes.** A container's files are disposable. A named volume is storage Docker keeps separately, so the
+  database survives `down`; `down --volumes` deletes it.
+- **Health checks.** A command Docker runs inside the container on a schedule. "Running" only means the process
+  started; "healthy" means it answers correctly. `up --wait` waits for healthy.
+- **Environment files.** `.env` keeps settings and secrets out of the YAML; `${NAME:?message}` refuses to start
+  without them.
+- **Database versus cache persistence.** MySQL must never lose data; this Redis may lose everything on a restart,
+  because the cache can be rebuilt from MySQL. One has a volume; the other has persistence switched off.
+- **Eviction.** With `maxmemory`, a full Redis evicts keys instead of rejecting writes; `allkeys-lru` removes the
+  least recently used ones.
+- **Least privilege.** The application's database user can only touch the `catalog` database.
+- **Cryptographic randomness.** Passwords come from a cryptographic generator, and bytes that would skew the
+  character distribution (modulo bias) are thrown away.
+- **Ports on a shared machine.** Pick an unusual block, and check both what is listening and Windows' reserved ranges.
+- **Test what you claim.** Restarting a *new* container proves nothing about persistence; restart the same one.
+
+**Exercises**
+1. Run `.\scripts\dev-services.ps1 status`, then the raw command it wraps:
+   `docker compose --env-file infra\.env -f infra\compose.dev.yaml ps`. Why is the script still worth having?
+2. Remove `127.0.0.1:` from the MySQL port mapping (don't commit it), run `up`, and check
+   `Get-NetTCPConnection -LocalPort 24306 -State Listen`. What changed, and who could connect now? Restore it afterwards.
+3. Why does the MySQL health check connect with `-h 127.0.0.1` inside the container, when the server runs right there?
+4. Delete `infra/.env` but keep the volume, then run `up`. What happens to the passwords, and why does MySQL ignore
+   the new ones? (Recover with `.\scripts\dev-services.ps1 reset -Force`, which deletes the database.)

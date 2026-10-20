@@ -146,6 +146,8 @@ docs/                 Plan, guides, decisions, evidence                         
 README.md             What works now, how to run it, evidence, deployment status      Phase 01
 ```
 
+- Host ports: a project-specific 24xxx block, bound to `127.0.0.1` for local services (README "Ports", decision
+  D-016). Framework defaults such as 8080, 3306, and 6379 are never bound on the development machine.
 - Planned Java base package: `com.example.catalog`. The `example.com` domain is reserved for documentation, so
   this package never claims a domain we don't own. It is confirmed in Phase 02.
 - Planned code organization: one feature package (`product`) whose class names show the layer

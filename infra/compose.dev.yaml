@@ -1,0 +1,77 @@
+# BUILD FLOW 03.01 — infra/compose.dev.yaml
+# First introduced: Phase 03
+# Purpose: The two backing services for local development, MySQL 8.4 and Redis 8.10, run as Docker
+#          containers with pinned images, health checks, and ports that only this computer can reach.
+# Depends on: Docker Desktop with the engine running; infra/.env for passwords and ports (created from
+#             infra/.env.example by scripts/dev-services.ps1).
+# Used by: scripts/dev-services.ps1 (03.03), which runs docker compose with this file. The backend's dev
+#          profile connects to MySQL from Phase 04 and to Redis from Phase 09.
+# Runtime role: Development infrastructure only. The production stack (Phase 14) gets its own Compose file.
+#
+# Compose in one minute: each entry under "services" describes one container (image, settings, ports,
+# storage). "docker compose up -d" creates and starts them; "down" removes them, but named volumes survive.
+# ${NAME:-default} reads NAME from infra/.env (or the shell) and falls back to the default if it is unset.
+# ${NAME:?message} stops with that message if NAME is unset, so a missing password is caught immediately.
+
+# BUILD FLOW 03.01.01 — Project name
+# Compose prefixes container, network, and volume names with the project name. Without this line the name
+# would be the folder name ("infra"), which other projects on the same machine might also use.
+name: product-catalog-dev
+
+services:
+  # BUILD FLOW 03.01.02 — MySQL 8.4 LTS: the source of truth
+  mysql:
+    # An exact patch tag (not "8.4" or "latest"), so every rebuild gets the same server version.
+    image: mysql:8.4.11
+    environment:
+      # On the FIRST start with an empty data volume, the image's entrypoint creates this database, creates a
+      # user with full rights on it, and sets the root password. Later starts reuse the volume and ignore these.
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-catalog}
+      MYSQL_USER: ${MYSQL_USER:-catalog}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD is not set; run .\scripts\dev-services.ps1 up}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD is not set; run .\scripts\dev-services.ps1 up}
+    ports:
+      # Format: "host-address:host-port:container-port". 127.0.0.1 (loopback) means only programs on this
+      # computer can connect. Without it, Docker listens on every network interface, so other devices on the
+      # same network could reach the database. 24306 belongs to this project's port block (README "Ports").
+      - "127.0.0.1:${MYSQL_HOST_PORT:-24306}:3306"
+    volumes:
+      # A named volume managed by Docker: the database files survive container restarts and "down".
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      # Healthy means: the application user can log in over TCP and run a query in the catalog database.
+      # TCP (-h 127.0.0.1, inside the container) matters: during first-time setup the image runs a temporary
+      # server WITHOUT networking, so this check passes only once the real server is up.
+      # "$$" is Compose's escape for "$": the shell inside the container expands these variables.
+      # MYSQL_PWD hands over the password without putting it on the command line.
+      test: ["CMD-SHELL", 'MYSQL_PWD="$$MYSQL_PASSWORD" mysql -h 127.0.0.1 -u "$$MYSQL_USER" -e "SELECT 1" "$$MYSQL_DATABASE" > /dev/null']
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      # First-time initialisation takes a while; failures during this grace period do not count.
+      start_period: 60s
+
+  # BUILD FLOW 03.01.03 — Redis 8.10: a pure cache
+  redis:
+    image: redis:8.10.2-alpine
+    # Command-line options instead of a redis.conf file:
+    #  --save "" and --appendonly no: no snapshots and no append-only log on disk. Everything in this cache can
+    #    be rebuilt from MySQL, so persistence would only cost disk writes; a restart simply starts empty.
+    #  --maxmemory 128mb with allkeys-lru: a hard memory cap. When it is reached, Redis evicts the least recently
+    #    used keys instead of rejecting writes.
+    # No password locally: the port is reachable only from this computer and holds only public catalog data.
+    # The production stack (Phase 14) does not publish Redis on any host port at all.
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
+    ports:
+      - "127.0.0.1:${REDIS_HOST_PORT:-24379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+# BUILD FLOW 03.01.04 — Named volumes
+# Declared here so Compose creates them (as product-catalog-dev_mysql-data). "down" keeps them;
+# "down --volumes" deletes them, which is what "dev-services.ps1 reset" does.
+volumes:
+  mysql-data:

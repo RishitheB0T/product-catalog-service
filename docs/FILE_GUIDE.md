@@ -47,7 +47,7 @@ here instead. Binary and generated internals are grouped rather than listed line
 | 02.04 | `backend/.mvn/wrapper/maven-wrapper.properties` | **(generated, plus one setting)** Pins Maven 3.10.0 and wrapper 3.3.4. We added `distributionSha256Sum`, verified against Apache's published SHA-512 | — | `mvnw`, `mvnw.cmd` | When upgrading Maven: change the URL and the checksum together |
 | 02.05 | `backend/src/main/java/com/example/catalog/CatalogApplication.java` | Entry point that starts Spring Boot. Its package is where component scanning starts | Spring Boot auto-configuration, the YAML files | The JVM, `spring-boot:run`, `@SpringBootTest` | The first Java file to read |
 | 02.06 | `backend/src/main/resources/application.yml` | Base configuration with safe defaults: app name, Actuator exposure limited to health, no health details | — | Spring Boot at startup | Before changing any setting |
-| 02.07 | `backend/src/main/resources/application-dev.yml` | Dev profile: port 8081, full health details, DEBUG logs for our package | `application.yml` | Local runs with the `dev` profile | When running locally |
+| 02.07 | `backend/src/main/resources/application-dev.yml` | Dev profile: listens on `127.0.0.1:24081` (since Phase 03), full health details, DEBUG logs for our package | `application.yml` | Local runs with the `dev` profile | When running locally |
 | 02.08 | `backend/src/main/resources/application-prod.yml` | Prod profile: locked-down Actuator settings pinned, banner off | `application.yml` | Docker and EC2 (Phases 14–15) | Before deploying |
 | 02.09 | `backend/src/test/java/com/example/catalog/HealthEndpointTest.java` | Real-HTTP tests of health, probes, and hidden endpoints under the base, dev, and prod configurations | 02.05–02.08, JUnit 6, AssertJ, Spring Boot test support | Maven Surefire (`mvnw verify`) | To see how profiles change behavior |
 
@@ -55,6 +55,15 @@ Files the generator produced that we did **not** keep: `HELP.md` (links only), `
 `backend/.gitattributes` (the root files cover them; the useful Java-IDE patterns moved into the root `.gitignore`),
 `application.properties` (replaced by the YAML files), and `CatalogApplicationTests` (`HealthEndpointTest` also
 starts the application).
+
+<!-- BUILD FLOW 01.06.05 — infra/ and scripts/ (added in Phase 03) -->
+## infra/ and scripts/
+
+| BUILD FLOW | Path | Purpose | Depends on | Caller / consumer | When to read |
+|---|---|---|---|---|---|
+| 03.01 | `infra/compose.dev.yaml` | Local MySQL 8.4.11 and Redis 8.10.2 containers: pinned images, health checks, `127.0.0.1`-only ports 24306/24379, named MySQL volume, Redis as a pure cache | Docker Desktop; `infra/.env` | `scripts/dev-services.ps1`; the backend's dev profile from Phase 04 | Before changing local services or ports |
+| 03.02 | `infra/.env.example` | Template for the private `infra/.env`: database name, user, password placeholders, host ports | — | `scripts/dev-services.ps1` (copies it on the first `up`) | When adding a setting that Compose needs |
+| 03.03 | `scripts/dev-services.ps1` | One command for `up`, `status`, `logs`, `down`, and `reset -Force`; creates `infra/.env` with random passwords on the first `up` | `infra/compose.dev.yaml`, `infra/.env.example`, Docker | The developer on Windows | Whenever you start or stop local services |
 
 <!-- BUILD FLOW 01.06.03 — Generated files -->
 ## Generated files

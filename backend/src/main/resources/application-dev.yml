@@ -9,12 +9,17 @@
 # A profile is a named set of configuration. Spring Boot reads application.yml first, then
 # application-<profile>.yml for each active profile, and the profile's values win.
 
-# BUILD FLOW 02.07.01 — Local port
+# BUILD FLOW 02.07.01 — Local address and port
 server:
-  # 8080 is Spring Boot's default, but another program already listens on 8080 on the machine
-  # this project is developed on, so local runs use 8081. Containers (Phase 14) keep 8080:
-  # each container has its own network namespace, so its ports cannot collide with the host's.
-  port: 8081
+  # Listen on the loopback address only (this computer), like the MySQL and Redis ports in Phase 03.
+  # Spring Boot's default is every network interface, which would let other devices on the same network
+  # reach the development server.
+  address: 127.0.0.1
+  # Spring Boot's default is 8080, but the development machine runs several projects and the framework
+  # defaults (8080, 8081, ...) are often taken. This project therefore uses its own block of host ports,
+  # 24xxx (README "Ports"); the backend gets 24081. Containers (Phase 14) keep 8080 inside their own
+  # network namespace, where it cannot collide with anything on the host.
+  port: 24081
 
 # BUILD FLOW 02.07.02 — Show full health details locally
 management:
@@ -29,4 +34,6 @@ logging:
   level:
     # DEBUG for classes under com.example.catalog only. Our classes start logging in Phase 05;
     # libraries stay at their default INFO level so the console remains readable.
-    com.example.catalog: debug
+    # logging.level is a map from logger name to level. The quoted brackets mark the whole dotted name as ONE
+    # map key (Spring Boot's "bracket notation"), so the dots are never read as further nesting.
+    "[com.example.catalog]": debug

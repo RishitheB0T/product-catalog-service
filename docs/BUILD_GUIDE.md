@@ -224,3 +224,83 @@ Maven ──reads──► pom.xml ──inherits──► spring-boot-starter-p
 java -jar / spring-boot:run ─► CatalogApplication.main ─► SpringApplication.run
   ─reads─► application.yml + application-<profile>.yml ─► Tomcat + Actuator ─► /actuator/health
 ```
+
+<!-- BUILD FLOW 01.05.05 — Phase 03 -->
+## Phase 03 — Local MySQL and Redis with Docker Compose
+
+**What we had before.** A backend that starts on its own but has nowhere to store data. Its dev port was 8081.
+
+**What we add.** MySQL 8.4.11 and Redis 8.10.2 as Docker containers defined in a Compose file, a template for their
+private settings, a PowerShell helper to manage them, and a project-specific block of host ports (24xxx) bound to
+loopback only. The backend's dev server moves into the same block: `127.0.0.1:24081`.
+
+**Why.** Phase 04 needs a real MySQL for the schema, and Phase 09 a real Redis. Containers give the same pinned
+versions with one command and can be reset in seconds. The port block prevents clashes with the other projects on
+the same machine.
+
+**Files in order**
+
+| BUILD FLOW | File | Role |
+|---|---|---|
+| 03.01 | `infra/compose.dev.yaml` | The MySQL and Redis services |
+| 03.02 | `infra/.env.example` | Template for the private `infra/.env` |
+| 03.03 | `scripts/dev-services.ps1` | `up` / `status` / `logs` / `down` / `reset -Force`; random passwords on the first `up` |
+
+Modified: `backend/src/main/resources/application-dev.yml` (02.07) now sets `server.address: 127.0.0.1` and
+`server.port: 24081` (was 8081), and writes the logging key in bracket notation.
+
+**Relevant syntax**
+- *Compose YAML*: `services` has one entry per container, with `image`, `environment`, `ports`, `volumes`,
+  `healthcheck`, and `command`. `"127.0.0.1:24306:3306"` means host address : host port : container port.
+  `${NAME:-default}` and `${NAME:?error}` substitute values from `.env`; `$$` hands a literal `$` to the container's shell.
+- *Health checks*: `test` runs inside the container every `interval`; `retries` failures in a row mark it unhealthy;
+  failures during `start_period` do not count.
+- *PowerShell*: `param()` with `[ValidateSet(...)]` and `[switch]`, `$PSScriptRoot`, the `switch` statement,
+  splatting an array into a native command (`docker @composeArgs`), and `try`/`finally`.
+- *Spring Boot*: bracket notation for map keys that contain dots: `"[com.example.catalog]": debug`.
+
+**Commands we ran** (PowerShell, repository root)
+
+| Command | Purpose |
+|---|---|
+| `netsh interface ipv4 show excludedportrange protocol=tcp` and `Get-NetTCPConnection -State Listen` | Find reserved and busy ports before choosing the block |
+| Docker Hub tag lookups for `mysql:8.4.*` and `redis:8.10.*` | Re-verify the newest patch tags |
+| `.\scripts\dev-services.ps1 up` | Create `infra/.env`, pull the images, start both containers, wait until healthy |
+| `docker compose … exec -T mysql sh -c '…mysql…'` with the SQL sent on standard input | Query MySQL as the app user without exposing the password |
+| `docker compose … exec -T redis redis-cli PING` and `CONFIG GET` | Check Redis and its cache settings |
+| `.\scripts\dev-services.ps1 down`, then `up` | Prove that the MySQL data volume survives |
+| `docker compose … restart redis` | Prove that Redis keeps nothing across a restart |
+| `.\mvnw.cmd clean verify` and `spring-boot:run` with `dev` | Re-test the backend and check its new address and port |
+
+**Expected behavior.** Both containers healthy; their ports reachable from this computer only; MySQL data survives
+`down`/`up`; Redis starts empty after a restart; the backend answers on `127.0.0.1:24081` only.
+
+**Actual checks** (2026-10-20)
+
+| Check | Result |
+|---|---|
+| Port block | The five candidate ports were not in use, not inside Windows' reserved ranges, and not mentioned in the other projects' 481 configuration files. At that time 8080, 5432, and 9090 were in use by other programs |
+| Images | `mysql:8.4.11` and `redis:8.10.2-alpine` were still the newest patches |
+| `dev-services.ps1 up` | Both containers healthy about 51 s after the first start, image downloads included; `infra/.env` created and git-ignored |
+| MySQL | Version 8.4.11, user `catalog@%`, database `catalog`, `utf8mb4` / `utf8mb4_0900_ai_ci`, 128 MB buffer pool. The user's grants cover only the `catalog` database |
+| Redis | `PONG`, version 8.10.2, `save` empty, `appendonly no`, `maxmemory` 134217728 bytes (128 MB), `allkeys-lru` |
+| Network | 24306, 24379, and 24081 listen on `127.0.0.1` only; connecting through the laptop's LAN address fails |
+| Persistence | A MySQL row survived `down` + `up` (containers removed, volume kept). A Redis key was gone after restarting the **same** container, and its shutdown log shows no snapshot being saved |
+| Resources | MySQL about 426 MiB of memory, Redis about 6 MiB |
+| Backend | `clean verify`: 6 tests, 0 failures. Dev run on `127.0.0.1:24081`, health 200, and the DEBUG line from `com.example.catalog` present, so the bracket notation works |
+
+Problems met on the way:
+- The first MySQL check failed with a SQL syntax error. Windows PowerShell 5.1 drops double quotes nested inside
+  arguments passed to external programs. Sending the SQL through standard input fixed it.
+- The first Redis "no persistence" check used `down` and `up`, which creates a brand-new container and therefore
+  proves nothing about persistence. Restarting the same container is the real test, and it passed.
+
+**How the pieces connect**
+
+```text
+dev-services.ps1 up ──creates──► infra/.env (random passwords, git-ignored)
+   └─► docker compose (project "product-catalog-dev") ──reads──► compose.dev.yaml + infra/.env
+         ├─ mysql  (named volume product-catalog-dev_mysql-data) ◄── 127.0.0.1:24306
+         └─ redis  (memory only, 128 MB, LRU eviction)          ◄── 127.0.0.1:24379
+backend (dev profile) on 127.0.0.1:24081 ──► uses MySQL from Phase 04 and Redis from Phase 09
+```
