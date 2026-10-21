@@ -493,3 +493,94 @@ client ─► Tomcat ─► DispatcherServlet ─► Jackson reads JSON ─► @
           └─ ProductMapper (DTO ⇄ entity)
    any exception ─► ApiExceptionHandler ─► application/problem+json
 ```
+
+<!-- BUILD FLOW 01.05.08 — Phase 06 -->
+## Phase 06 — Search with filters, stable sorting, and pagination
+
+**What we had before.** Single products could be read and written, but there was no way to list or find products.
+
+**What we add.** `GET /api/v1/products` with five optional filters (`q`, `category`, `minPrice`, `maxPrice`,
+`inStock`), a sort allowlist whose orders all end with `id`, zero-based pages with validated bounds, and our own page
+envelope. Filters become JPA predicates with bound parameters (Spring Data JPA Specifications), and invalid
+parameters get the same Problem Details as invalid bodies.
+
+**Why.** The storefront (Phase 12) is built around this endpoint, and Phase 08 needs a real, unoptimized search query
+to measure before adding indexes. Paging must be correct before it is fast: no product may appear twice or never.
+
+**Files in order**
+
+| BUILD FLOW | File | Role |
+|---|---|---|
+| 06.01 | `backend/src/main/java/com/example/catalog/product/ProductSort.java` | Sort allowlist; each order ends with `id` |
+| 06.02 | `backend/src/main/java/com/example/catalog/product/ProductSortConverter.java` | `?sort=` text → `ProductSort` |
+| 06.03 | `backend/src/main/java/com/example/catalog/product/ValidPriceRange.java` | Cross-field rule: `maxPrice` ≥ `minPrice` |
+| 06.04 | `backend/src/main/java/com/example/catalog/product/ProductSearchRequest.java` | The query parameters, validated, with defaults |
+| 06.05 | `backend/src/main/java/com/example/catalog/api/PageResponse.java` | The page envelope |
+| 06.06 | `backend/src/main/java/com/example/catalog/product/ProductSpecifications.java` | Filters → predicates; LIKE escaping |
+| 06.07 | `backend/src/test/java/com/example/catalog/product/ProductSearchTest.java` | Search tests on MySQL |
+
+Modified: `ProductRepository.java` (04.04.03: `JpaSpecificationExecutor`); `ProductService.java` (05.10.07:
+`searchProducts`); `ProductController.java` (05.11.06: `GET /api/v1/products`); `ApiExceptionHandler.java` (05.12.04
+and 05.12.08: neutral messages for query values that cannot be converted); `ProductControllerTest.java` (05.13.05:
+eight search tests).
+
+**Relevant syntax**
+- *Spring Data JPA*: `Specification<Product>` as a lambda `(root, query, builder) -> builder.like(root.get("name"), pattern, '!')`,
+  `Specification.allOf(list)`, `JpaSpecificationExecutor.findAll(spec, pageable)`, `PageRequest.of(page, size, sort)`,
+  `Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id"))`, `page.map(mapper::toResponse)`.
+- *Spring MVC*: `@ModelAttribute` binding query parameters to a record; a `Converter<String, ProductSort>` bean.
+- *Bean Validation*: `@Min`, `@Max`, `@Size` on record components; a custom class-level constraint
+  (`@Constraint(validatedBy = …)`, `ConstraintValidator`, `addPropertyNode("maxPrice")`).
+- *Java*: a record's compact constructor (`public ProductSearchRequest { page = (page == null) ? 0 : page; … }`), an
+  enum with fields and an overridden `toString()`, a generic record `PageResponse<T>`, `List.copyOf`.
+- *Errors*: `FieldError.contains(TypeMismatchException.class)` and `unwrap(…)` to recognize values that failed conversion.
+- *Tests*: `@Transactional` on a test class (rollback after each test), `JdbcTemplate.update`, `LAST_INSERT_ID()`,
+  AssertJ `containsExactly`; MockMvc `.param(…)` and Hamcrest `contains`/`everyItem` on `jsonPath`.
+
+**Commands we ran** (PowerShell)
+
+| Command | Purpose |
+|---|---|
+| `javap` on the Spring Data JPA 4.1 and Spring classes | Confirm the `Specification` and binding-error APIs before writing code |
+| A search of the Spring Data jars for two messages | Confirm the offset limit (`PageableUtils`) and the warning about serializing `PageImpl` |
+| `.\scripts\dev-services.ps1 up` | Start MySQL and Redis |
+| `.\mvnw.cmd -B -ntp clean verify` | Build and run all 64 tests |
+| `java -jar target\catalog-0.0.1-SNAPSHOT.jar` with `dev`, `--logging.level.org.hibernate.SQL=debug`, `--logging.level.org.hibernate.orm.jdbc.bind=trace`, and `--logging.file.name=…` | Run the API with every SQL statement and bound value logged |
+| 19 searches with `curl.exe`, each followed by counting the new SQL lines in the log | Check results, errors, and the number of queries per request |
+| The README's search example, run verbatim | Make sure the documented example works |
+
+**Expected behavior.** Every combination of filters works; each sort orders by its main column and then by `id`;
+pages never overlap; invalid parameters get a 400 naming them, and no SQL runs for them; search text is only ever a
+bound value.
+
+**Actual checks** (2026-10-21)
+
+| Check | Result |
+|---|---|
+| `clean verify` | 64 tests, 0 failures, on the first run: 22 controller, 13 search, 13 repository, 8 service, 6 health, 2 demo data |
+| Defaults | 24 products, 2 pages, 20 on the first; ids 24 down to 5, because all demo rows share one `created_at` and the `id` tie-breaker decides |
+| Filters | `category=BAGS&sort=price_asc`: the four bags, cheapest first. `q=LINEN`: three names containing "Linen". `minPrice=1000&maxPrice=2000&inStock=true`: six products, the ₹1,290 tie in id order (1, then 19). `inStock=false`: the two sold-out products |
+| SQL | `where p1_0.name like ? escape '!' order by p1_0.name,p1_0.id limit ?,?` with `[%LINEN%]` bound. No filters: no WHERE clause. `?q=x' OR '1'='1` was bound as the value `%x' OR '1'='1%` and found nothing. `?q=%` became `%!%%` and found nothing |
+| Queries per request | Full first page: 2 (page + `COUNT`). Partial last page (page 2 of 10): 1, since 20 + 4 gives the total. Page past the end: 2. Invalid parameters: 0 |
+| Errors | `size=500`, `page=-1`, `page=30000000`, `sort=popular`, `category=SHOES`, `minPrice=5000&maxPrice=1000`, and `minPrice=abc&page=x` each gave 400 `validation-failed` with the right fields and messages |
+| README example | The `Invoke-RestMethod` search printed "2 products, page 1 of 1" with the sling bag and the tote |
+
+Mistakes and findings on the way:
+- A repeated parameter (`?category=BAGS&category=HOME`) silently uses the first value. Recorded in D-034 and the README.
+- `?sort=popular&size=500` reported only `sort`: when a value cannot be converted, Spring skips the validation rules.
+  My first code comments claimed every problem is always reported at once; they were corrected to match.
+- The test MySQL container took 76 seconds to start on this run, with the development containers running at the same
+  time; the tests themselves took a few seconds per class.
+
+**How the pieces connect**
+
+```text
+GET /api/v1/products?q=linen&sort=price_asc
+   ─► data binding: ProductSortConverter, defaults (compact constructor), @Valid + @ValidPriceRange
+   ─► ProductController.searchProducts ─► ProductService.searchProducts (read-only transaction)
+          ├─ ProductSpecifications.matching ─► WHERE … (bound parameters)
+          ├─ ProductSort.toSort ─► ORDER BY …, id
+          └─ ProductRepository.findAll(spec, PageRequest) ─► page query (+ COUNT when needed) ─► MySQL
+   ─► ProductMapper + PageResponse.from ─► {content, page, size, totalElements, totalPages}
+   invalid parameters ─► ApiExceptionHandler ─► 400 validation-failed (no SQL)
+```

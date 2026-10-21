@@ -495,8 +495,8 @@ their phase, or changed with a `DECISIONS.md` entry.
 
 ### Phase 06 — Search
 - `GET /api/v1/products` with `q`, `category`, `minPrice`, `maxPrice`, `inStock`, `page`, `size` (at most 100),
-  and an allowlisted `sort`. Build dynamic predicates with bound parameters (planned: Spring Data JPA
-  Specifications), always add the `id` tie-breaker, and return `content`, `page`, `size`, `totalElements`, `totalPages`.
+  and an allowlisted `sort`. Build dynamic predicates with bound parameters (Spring Data JPA Specifications, decision
+  D-031), always add the `id` tie-breaker, and return `content`, `page`, `size`, `totalElements`, `totalPages`.
 - Checks: tests for combined filters, ordering ties, page boundaries, and invalid parameters returning 400.
 
 ### Phase 07 — Broader backend tests

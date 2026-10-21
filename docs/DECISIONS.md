@@ -250,7 +250,8 @@ history, with a pointer to its replacement).
   `ResponseEntityExceptionHandler` renders Spring MVC's own errors in the same format. `type` is a stable
   machine-readable identifier; `detail` is for people.
 - **Safety:** Jackson's raw parse messages, which name Java classes, are replaced by neutral text; stack traces are
-  logged but never returned.
+  logged but never returned. Since Phase 06 the same applies to query parameters that cannot be converted
+  (`?minPrice=abc`, `?sort=popular`); for enums the message lists the accepted values.
 - **Alternatives:** a custom error record (simpler, but non-standard); Spring Boot's default error JSON (a different
   shape from our own errors).
 
@@ -303,12 +304,73 @@ history, with a pointer to its replacement).
   loader classes…"): the agent extends the boot class path, which switches off part of Class Data Sharing, a startup
   optimization, in the test JVM.
 
+## D-031 · Search with Spring Data JPA Specifications — Accepted (Phase 06)
+
+- **Decision:** `ProductRepository` extends `JpaSpecificationExecutor`. `ProductSpecifications` holds one small
+  predicate per filter; `matching(…)` joins the filters that were sent with `Specification.allOf` (AND), and
+  `findAll(specification, pageable)` runs the page query plus, when needed, the count query.
+- **Why:** five optional filters make 32 combinations. Predicates composed at runtime cover all of them, and every
+  value travels as a bound parameter, so no SQL is ever assembled from request text.
+- **Alternatives:** derived query methods (one per combination); one `@Query` with `(:q IS NULL OR …)` for every
+  filter (a single query, but the optional conditions make it harder for MySQL to use indexes well, which matters in
+  Phase 08); JPQL built by string concatenation (easy to get wrong, open to injection); Querydsl (type-safe, but an
+  extra dependency with code generation); Query by Example (cannot express ranges).
+- **Trade-off:** attribute names are strings (`"price"`), checked only when a query runs. `ProductSearchTest` runs every
+  predicate against MySQL. The JPA static metamodel (`Product_.price`) would check them when compiling, at the cost of
+  an annotation processor in the build.
+
+## D-032 · A sort allowlist that always ends with `id` — Accepted (Phase 06)
+
+- **Decision:** `sort` accepts exactly `newest` (the default), `price_asc`, `price_desc`, and `name_asc`. Each maps to an
+  order written in `ProductSort`, ending with `id` in the same direction as the main column.
+- **Why:** clients never name a column, so no request text reaches `ORDER BY`, and only orders that Phase 08 can
+  support with indexes exist. The unique `id` gives every row exactly one position, so offset pages never repeat or
+  skip a row when values tie. The same direction lets one index (InnoDB appends the primary key) serve the whole order.
+- **Alternative:** Spring Data's `Pageable` controller parameter (`?sort=price,desc`). It accepts any entity attribute
+  as a sort key and quietly corrects out-of-range page numbers and sizes instead of reporting them.
+- **Trade-off:** a new sort option is a code change, which is also the right moment to check its index.
+
+## D-033 · Offset pagination with validated bounds — Accepted (Phase 06)
+
+- **Decision:** zero-based `page` from 0 to 10,000 and `size` from 1 to 100 (default 20). Values outside these ranges
+  get a 400 naming them. A page after the last one is a normal 200 with empty `content` and the real totals.
+- **Why the page limit:** Spring Data refuses offsets above `Integer.MAX_VALUE` with an exception (seen in its
+  `PageableUtils`), which would surface as a 500; the limit turns that into a clear 400. It also bounds the cost of
+  `OFFSET`, which makes MySQL read and discard every skipped row.
+- **Alternative:** keyset ("seek") pagination, `WHERE (price, id) > (?, ?)` from the last row seen. Its cost does not
+  grow with depth and it is stable while rows are inserted, but it cannot jump to page N and needs cursors in the API.
+  Numbered pages over a catalog of this size are well served by offsets.
+- **Trade-off:** offset pages can shift when products are added or deleted between two page requests.
+
+## D-034 · Search semantics — Accepted (Phase 06)
+
+- **Decision:**
+  - `q`: a contains-match on the name, case- and accent-insensitive through the column's collation
+    (`utf8mb4_0900_ai_ci`), with `%`, `_`, and `!` matched literally (`ESCAPE '!'`); at most 100 characters.
+  - `category`: exact match. `minPrice` and `maxPrice`: inclusive, non-negative, and min ≤ max (`@ValidPriceRange`).
+  - `inStock=true`: stock above 0; `inStock=false`: sold out (stock 0); not sent: both.
+  - Blank values count as not sent, and parameters with other names are ignored.
+- **Observed binding behavior (kept as is):** a repeated parameter uses its first value (`?category=BAGS&category=HOME`
+  searched BAGS). If a value cannot be converted (`?sort=popular`), only conversion errors are reported; the
+  validation rules run once every value converts.
+- **Why:** predictable rules that both the storefront and the admin view can use, each one tested on MySQL.
+- **Trade-off:** `LIKE '%…%'` cannot use an ordinary B-tree index to narrow the rows. Phase 08 measures the cost before
+  choosing a remedy (a FULLTEXT index, for example, would also change the matching rules).
+
+## D-035 · Our own page envelope — Accepted (Phase 06)
+
+- **Decision:** search returns `PageResponse<T>` with exactly `content`, `page`, `size`, `totalElements`, and
+  `totalPages`.
+- **Why:** Spring Data's `PageImpl` serialized as-is has no stable JSON shape; Spring Data 4.1 logs a warning when that
+  happens. A record of our own is a contract that changes only when we change it.
+- **Alternative:** Spring Data's `PagedModel` (`@EnableSpringDataWebSupport(pageSerializationMode = VIA_DTO)`). It is
+  stable too, but it nests the numbers in a `page` object, which differs from the required shape.
+
 <!-- BUILD FLOW 01.08.03 — Open questions -->
 ## Open questions (each is decided in its phase)
 
 | Question | Phase |
 |---|---|
-| Search implementation (Spring Data JPA Specifications proposed) | 06 |
 | Cache code style (explicit service code proposed) and eviction mechanism (an after-commit listener proposed) | 09–10 |
 | Routing: React Router or a small hand-written router | 12 |
 | Product images: self-hosted licensed files or licensed remote URLs | 12 |

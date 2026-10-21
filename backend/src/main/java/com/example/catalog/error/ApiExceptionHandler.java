@@ -2,9 +2,9 @@
  * BUILD FLOW 05.12 — ApiExceptionHandler.java
  * First introduced: Phase 05
  * Purpose: Turns every error into one JSON format: RFC 9457 "Problem Details" (media type application/problem+json),
- *          with an "errors" list when individual fields are wrong.
- * Depends on: Spring MVC's ResponseEntityExceptionHandler and ProblemDetail, the domain exceptions 05.06–05.09, and
- *             Jackson 3's exception types for unreadable JSON.
+ *          with an "errors" list when individual fields or (since Phase 06) query parameters are wrong.
+ * Depends on: Spring MVC's ResponseEntityExceptionHandler and ProblemDetail, the domain exceptions 05.06–05.09,
+ *             Jackson 3's exception types for unreadable JSON, and Spring's binding errors for query parameters.
  * Used by: Spring MVC, whenever a controller or Spring itself (unknown URL, wrong method, bad JSON) throws.
  * Runtime role: The last step of every failed request.
  */
@@ -19,6 +19,7 @@ import jakarta.servlet.http.HttpServletRequest;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.TypeMismatchException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -26,6 +27,7 @@ import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -89,12 +91,13 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
     }
 
     // BUILD FLOW 05.12.04 — Validation failures (@Valid)
-    // Every invalid field is reported at once, sorted so the order is stable for clients and tests.
+    // Every invalid field is reported at once, sorted so the order is stable for clients and tests. Since Phase 06 the
+    // same response covers search parameters, including values that could not be converted at all (05.12.08).
     @Override
     protected ResponseEntity<Object> handleMethodArgumentNotValid(MethodArgumentNotValidException ex, HttpHeaders headers,
             HttpStatusCode status, WebRequest request) {
         List<FieldProblem> errors = ex.getBindingResult().getFieldErrors().stream()
-                .map(error -> new FieldProblem(error.getField(), error.getDefaultMessage()))
+                .map(error -> new FieldProblem(error.getField(), message(error)))
                 .sorted(Comparator.comparing(FieldProblem::field).thenComparing(FieldProblem::message))
                 .toList();
         String detail = errors.size() == 1 ? "1 field is invalid." : errors.size() + " fields are invalid.";
@@ -164,9 +167,24 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
     }
 
     private static String describe(JacksonException ex) {
-        if (ex instanceof InvalidFormatException invalid && invalid.getTargetType() != null
-                && invalid.getTargetType().isEnum()) {
-            return "must be one of " + Arrays.toString(invalid.getTargetType().getEnumConstants());
+        return describe(ex instanceof InvalidFormatException invalid ? invalid.getTargetType() : null);
+    }
+
+    // BUILD FLOW 05.12.08 — Query values that cannot be converted (added in Phase 06)
+    // ?minPrice=abc or ?sort=popular fails while Spring converts the text, before any validation rule runs. Spring
+    // records a field error that wraps the TypeMismatchException; its default message names Java classes, so it is
+    // replaced with the same neutral wording as for JSON bodies. For enums the accepted values are listed as each
+    // constant prints itself: Category by its name, ProductSort by its API value.
+    private static String message(FieldError error) {
+        if (error.contains(TypeMismatchException.class)) {
+            return describe(error.unwrap(TypeMismatchException.class).getRequiredType());
+        }
+        return error.getDefaultMessage();
+    }
+
+    private static String describe(Class<?> targetType) {
+        if (targetType != null && targetType.isEnum()) {
+            return "must be one of " + Arrays.toString(targetType.getEnumConstants());
         }
         return "has a value of the wrong type or format";
     }

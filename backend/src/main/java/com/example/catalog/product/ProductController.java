@@ -1,11 +1,14 @@
 /*
  * BUILD FLOW 05.11 — ProductController.java
  * First introduced: Phase 05
- * Purpose: The HTTP endpoints for single products: GET, POST, PUT, and DELETE under /api/v1/products.
- * Depends on: ProductService (05.10) and the DTOs 05.02–05.04.
+ * Purpose: The HTTP endpoints under /api/v1/products: search (GET on the collection, since Phase 06), and GET, POST,
+ *          PUT, and DELETE for single products.
+ * Depends on: ProductService (05.10), the DTOs 05.02–05.04, and for search ProductSearchRequest (06.04) and
+ *             PageResponse (06.05).
  * Called by: Spring MVC's DispatcherServlet when a matching request arrives (through the Vite proxy in development
  *            and Nginx in production).
- * Runtime role: The HTTP step of every product request (runtime steps READ-02, WRITE-03, and the final response).
+ * Runtime role: The HTTP step of every product request (runtime steps SEARCH-03, READ-02, WRITE-03, and the final
+ *               response).
  */
 package com.example.catalog.product;
 
@@ -16,12 +19,15 @@ import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+
+import com.example.catalog.api.PageResponse;
 
 // BUILD FLOW 05.11.01 — HTTP in, HTTP out, nothing else
 // @RestController = @Controller + @ResponseBody: return values are written to the response as JSON by Jackson.
@@ -36,6 +42,17 @@ public class ProductController {
 
     public ProductController(ProductService service) {
         this.service = service;
+    }
+
+    // BUILD FLOW 05.11.06 — GET /api/v1/products: search (runtime step SEARCH-03; added in Phase 06)
+    // @ModelAttribute binds the query string to a record: ?q=linen&category=HOME&page=0 becomes a ProductSearchRequest
+    // (a parameter of a non-simple type would be treated this way even without the annotation; it is written out for
+    // clarity). @Valid checks its rules. Values that cannot be converted lead to a 400 naming them; otherwise every
+    // broken rule is listed in one 400. Either way the service is never called. With no parameters the defaults
+    // apply: the first page, 20 products, newest first.
+    @GetMapping
+    public PageResponse<ProductResponse> searchProducts(@Valid @ModelAttribute ProductSearchRequest request) {
+        return service.searchProducts(request);
     }
 
     // BUILD FLOW 05.11.02 — GET /api/v1/products/{id} (runtime step READ-02)

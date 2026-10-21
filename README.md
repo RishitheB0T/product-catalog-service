@@ -14,9 +14,9 @@ A product catalog built from an empty folder in documented phases, with every fi
 **Spring Boot** REST API over **MySQL**, **Redis** caching for product details, and a **React** storefront that
 uses the real API.
 
-> **Status: Phase 05 of 16 complete.** The product API reads, creates, updates, and deletes single products, with
-> validation, optimistic locking, and one error format; production settings are read-only. Search arrives in
-> Phase 06. This README always describes what actually works; anything not built yet is labeled *planned*.
+> **Status: Phase 06 of 16 complete.** The product API searches the catalog (filters, sorting, pagination) and reads,
+> creates, updates, and deletes single products, with validation, optimistic locking, and one error format; production
+> settings are read-only. This README always describes what actually works; anything not built yet is labeled *planned*.
 
 <!-- BUILD FLOW 01.04.01 — What works today -->
 ## What works today
@@ -28,7 +28,7 @@ uses the real API.
 | Local MySQL 8.4 and Redis 8.10 in Docker Compose, with a one-command helper | Done (Phase 03) |
 | Product schema (Flyway), JPA entity and repository, dev demo catalog, tests on real MySQL | Done (Phase 04) |
 | Product API: get, create, update, delete; validation; RFC 9457 errors; read-only production mode | Done (Phase 05) |
-| Search with filters, sorting, and pagination | Planned (Phase 06) |
+| Search with filters, sorting, and pagination; validated parameters | Done (Phase 06) |
 | Measured query optimization | Planned (Phase 08) |
 | Redis product-detail cache | Planned (Phases 09–10) |
 | Benchmarks and performance report | Planned (Phase 11) |
@@ -177,14 +177,43 @@ interface, which suits a container but not a shared development machine.
 <!-- BUILD FLOW 01.04.09 — API (added in Phase 05) -->
 ## API
 
-Base path `/api/v1/products`, JSON in and out. Search (`GET /api/v1/products`) arrives in Phase 06.
+Base path `/api/v1/products`, JSON in and out.
 
 | Method and path | Success | Typical errors |
 |---|---|---|
+| `GET /api/v1/products` | 200 with one page of products | 400 invalid parameters |
 | `GET /api/v1/products/{id}` | 200 with the product | 404 unknown id; 400 non-numeric id |
 | `POST /api/v1/products` | 201 with the product and a `Location` header | 400 invalid fields or JSON; 409 duplicate SKU; 403 read-only |
 | `PUT /api/v1/products/{id}` | 200 with the product (version + 1) | 400; 404; 409 duplicate SKU or outdated version; 403 |
 | `DELETE /api/v1/products/{id}` | 204 | 404; 409 changed meanwhile; 403 |
+
+**Search.** Every parameter is optional, and all filters that are sent must match.
+
+| Parameter | Meaning | Default and limits |
+|---|---|---|
+| `q` | The name contains this text. Case and accents are ignored; `%` and `_` match literally | At most 100 characters |
+| `category` | `APPAREL`, `FOOTWEAR`, `BAGS`, `HOME`, `KITCHEN`, or `STATIONERY` | — |
+| `minPrice`, `maxPrice` | Price range in rupees, both ends included | At least 0, at most two decimals, `minPrice` ≤ `maxPrice` |
+| `inStock` | `true`: only products in stock; `false`: only sold-out products | Not sent: both |
+| `page` | Zero-based page number | 0; at most 10,000 |
+| `size` | Products per page | 20; from 1 to 100 |
+| `sort` | `newest`, `price_asc`, `price_desc`, or `name_asc`. Products that tie are ordered by `id` | `newest` |
+
+The response is `{"content": [...products...], "page": 0, "size": 12, "totalElements": 2, "totalPages": 1}`. A page
+after the last one returns empty `content` with the real totals. Blank values count as not sent, unknown parameters
+are ignored, and a repeated parameter uses its first value.
+
+```powershell
+$page = Invoke-RestMethod "http://localhost:24081/api/v1/products?category=BAGS&maxPrice=3000&inStock=true&sort=price_asc&size=12"
+"$($page.totalElements) products, page $($page.page + 1) of $($page.totalPages)"
+$page.content | Format-Table id, name, price, stockQuantity
+```
+
+Invalid parameters get a 400 `validation-failed` that names them, for example
+`curl.exe -s "http://localhost:24081/api/v1/products?sort=popular"` answers with
+`{"field": "sort", "message": "must be one of [newest, price_asc, price_desc, name_asc]"}` in `errors`. A value that
+cannot be converted at all (such as `?page=abc`) is reported on its own; the range rules are checked once every value
+converts.
 
 Creating, updating, and deleting with Windows PowerShell (dev profile running):
 
@@ -243,9 +272,13 @@ cd backend
 .\mvnw.cmd verify
 ```
 
-43 tests in five classes:
-- `ProductControllerTest` (14), a web-layer test with the service replaced by a Mockito test double: status codes,
-  JSON shapes, validation messages, and every Problem Details type.
+64 tests in six classes:
+- `ProductControllerTest` (22), a web-layer test with the service replaced by a Mockito test double: status codes,
+  JSON shapes, validation messages, every Problem Details type, and the search parameters (defaults, binding, and
+  every kind of invalid value).
+- `ProductSearchTest` (13) searches real MySQL: each filter and their combination, case- and accent-insensitive names,
+  `%` and `_` matched literally, inclusive price bounds, every sort with its `id` tie-breaker, and pages that never
+  overlap or skip a product.
 - `ProductServiceTest` (8) runs real transactions on real MySQL: commits, a failed update rolled back completely,
   outdated versions and duplicate SKUs refused, and every write refused under the `prod` profile.
 - `HealthEndpointTest` (6) starts the real application with no profile, `dev`, and `prod`, and checks over HTTP that

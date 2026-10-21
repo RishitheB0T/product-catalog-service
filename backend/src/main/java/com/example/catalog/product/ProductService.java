@@ -1,20 +1,24 @@
 /*
  * BUILD FLOW 05.10 — ProductService.java
  * First introduced: Phase 05
- * Purpose: The product rules: read, create, update, and delete, each inside one database transaction. It refuses
- *          writes in read-only deployments, checks versions, and translates database errors into domain errors.
- * Depends on: ProductRepository (04.04), ProductMapper (05.05), CatalogProperties (05.01), and the exceptions
- *             05.06–05.09.
+ * Purpose: The product rules: read, search, create, update, and delete, each inside one database transaction. It
+ *          refuses writes in read-only deployments, checks versions, and translates database errors into domain errors.
+ * Depends on: ProductRepository (04.04), ProductMapper (05.05), CatalogProperties (05.01), the exceptions 05.06–05.09;
+ *             for search ProductSearchRequest (06.04), ProductSpecifications (06.06), and PageResponse (06.05).
  * Called by: ProductController (05.11).
- * Runtime role: The business-logic step of every product request (runtime steps READ-03 and WRITE-04 to WRITE-06).
+ * Runtime role: The business-logic step of every product request (runtime steps READ-03, SEARCH-04 to SEARCH-06, and
+ *               WRITE-04 to WRITE-06).
  */
 package com.example.catalog.product;
 
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.example.catalog.api.PageResponse;
 import com.example.catalog.config.CatalogProperties;
 import com.example.catalog.error.WritesDisabledException;
 
@@ -46,6 +50,18 @@ public class ProductService {
     @Transactional(readOnly = true)
     public ProductResponse getProduct(long id) {
         return mapper.toResponse(findExisting(id));
+    }
+
+    // BUILD FLOW 05.10.07 — Searching (runtime steps SEARCH-04 to SEARCH-06; added in Phase 06)
+    // One read-only transaction covers both queries Spring Data may run: the page itself (ORDER BY … LIMIT) and a
+    // COUNT with the same WHERE clause. The count is skipped when the page itself reveals the total, for example a
+    // first page that is not full. PageRequest.of takes the zero-based page, the size, and the order from the sort
+    // allowlist. page.map converts each entity to a DTO while the transaction is still open.
+    @Transactional(readOnly = true)
+    public PageResponse<ProductResponse> searchProducts(ProductSearchRequest request) {
+        PageRequest pageRequest = PageRequest.of(request.page(), request.size(), request.sort().toSort());
+        Page<Product> page = repository.findAll(ProductSpecifications.matching(request), pageRequest);
+        return PageResponse.from(page.map(mapper::toResponse));
     }
 
     // BUILD FLOW 05.10.03 — Creating a product

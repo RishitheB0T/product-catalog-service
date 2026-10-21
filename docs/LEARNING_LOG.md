@@ -224,3 +224,40 @@ Concepts in the order we met them, each with small practice exercises.
 3. Why does `ProductService.createProduct` call `saveAndFlush` instead of `save`?
 4. Why can't the service simply call `findBySku` before inserting, and skip the unique constraint?
 5. With the `prod` profile, send a `POST` whose body is invalid. Is the answer 400 or 403? Explain from `REQUEST_FLOWS.md`.
+
+<!-- BUILD FLOW 01.09.07 — Phase 06 -->
+## Phase 06 — Search
+
+**Concepts**
+- **Dynamic queries with Specifications.** One small predicate per filter, combined at runtime with AND. Only the
+  filters that were sent become part of the WHERE clause, and every value is a bound parameter.
+- **Bound parameters vs. string building.** A bound value can never change the structure of the SQL statement, which
+  is why `x' OR '1'='1` in the search box is harmless. Sort keys cannot be bound parameters at all (they are part of
+  the statement's structure), so they come from an allowlist instead.
+- **Total ordering.** `ORDER BY price` alone leaves ties in an unspecified order, which can differ between two queries.
+  Adding the unique `id` gives every row exactly one position, so pages never overlap or skip rows.
+- **Offset pagination.** `LIMIT size OFFSET page × size`. Simple and allows jumping to any page, but MySQL reads and
+  discards every skipped row, and pages shift when rows are inserted. Keyset pagination is the alternative for deep
+  or endless lists.
+- **Page queries and count queries.** A page needs the total for "page 2 of 5"; Spring Data runs a second `COUNT`
+  query unless the page itself already reveals the total.
+- **LIKE wildcards and escaping.** `%` (any run of characters) and `_` (any one character) in user text must be escaped,
+  and the escape character itself must be escaped first.
+- **Collations.** `utf8mb4_0900_ai_ci` is accent-insensitive (`ai`) and case-insensitive (`ci`), so equality and LIKE
+  ignore both without `LOWER()`.
+- **Data binding.** Spring builds a record from query parameters by name, converts text to the component types through
+  `Converter`s, and reports values it cannot convert as field errors, just like broken validation rules.
+- **Custom constraints.** A class-level annotation with a `ConstraintValidator` checks rules that span fields
+  (min ≤ max) and can attach the error to a chosen field.
+- **Compact constructors.** A record's compact constructor can normalize input (strip spaces) and fill defaults, so
+  every instance is valid to use however it was created.
+
+**Exercises**
+1. Run `GET /api/v1/products?sort=price_asc&size=5` and then `?sort=price_asc&size=5&page=1`. Which products tie on
+   price, and how does the order between them stay the same on both pages?
+2. Explain why `ProductSort` lists the sort orders in code instead of reading the column name from `?sort=`. What
+   could a client do if any attribute were allowed?
+3. What would `?q=100%` find if `escapeLike` did not exist? And if it escaped `%` and `_` but forgot `!`?
+4. Why does `ValidPriceRange` use `compareTo` and not `equals`? Try `new BigDecimal("1000").equals(new BigDecimal("1000.00"))`.
+5. With 24 products and `size=10`, how many SQL statements run for page 0, page 2, and page 3? Turn on SQL logging and
+   check your answer.

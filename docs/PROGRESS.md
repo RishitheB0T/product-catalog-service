@@ -17,8 +17,8 @@ Runtime role: None. Documentation only.
 
 | Item | Value |
 |---|---|
-| Current phase | **05 — complete** |
-| Next phase | 06 — filtered search, stable pagination and sorting, validation, errors |
+| Current phase | **06 — complete** |
+| Next phase | 07 — broader backend tests: full-stack HTTP tests on a random port, example requests |
 | Branch | `main`, tracking `origin/main` |
 | Repository | https://github.com/RishitheB0T/product-catalog-service (public) |
 | Last updated | 2026-10-21 |
@@ -32,7 +32,8 @@ Runtime role: None. Documentation only.
 | Phase 02 | `ee94490` | `chore(backend): bootstrap Spring Boot application` | Pushed and verified |
 | Phase 03 | `71f067c` | `chore(infra): add local MySQL and Redis services` | Pushed and verified |
 | Phase 04 | `191b5b8` | `feat(database): add product schema and persistence` | Pushed and verified |
-| Phase 05 | Recorded at the start of Phase 06 | `feat(api): implement product CRUD operations` | Pushed and verified when committed |
+| Phase 05 | `05e70c3` | `feat(api): implement product CRUD operations` | Pushed and verified |
+| Phase 06 | Recorded at the start of Phase 07 | `feat(search): add validated product search and pagination` | Pushed and verified when committed |
 
 <!-- BUILD FLOW 01.10.02 — Checks run in Phase 01 -->
 ## Checks run in Phase 01
@@ -111,6 +112,24 @@ All ran on 2026-10-21. Full details are in `BUILD_GUIDE.md`, Phase 05.
 - The test JVM prints one harmless Class Data Sharing notice caused by the Mockito agent (D-030).
 - Windows PowerShell 5.1's `Invoke-RestMethod` does not show Problem Details bodies on errors; use `curl.exe`.
 
+<!-- BUILD FLOW 01.10.10 — Checks run in Phase 06 -->
+## Checks run in Phase 06
+
+All ran on 2026-10-21. Full details are in `BUILD_GUIDE.md`, Phase 06.
+- `.\mvnw.cmd clean verify`: 64 tests, 0 failures (22 controller, 13 search, 13 repository, 8 service, 6 health,
+  2 demo data).
+- 19 manual searches with `curl.exe` against the dev server with SQL logging: filters, sorts, ties, paging, and every
+  kind of invalid parameter behaved as designed. Search text was always a bound value, and no SQL ran for invalid
+  requests.
+- Queries per request, counted in the SQL log: a full first page 2 (page + `COUNT`), a partial last page 1, a page past
+  the end 2.
+- The README's search example ran verbatim.
+
+**Carry-forward items**
+- No search indexes yet, on purpose: Phase 08 measures this baseline with `EXPLAIN ANALYZE` first.
+- A repeated query parameter uses its first value, and conversion errors are reported before (instead of together
+  with) rule violations (D-034). Phase 07's HTTP tests can pin these down.
+
 <!-- BUILD FLOW 01.10.03 — Environment -->
 ## Environment (inspected 2026-10-20)
 
@@ -137,17 +156,16 @@ All ran on 2026-10-21. Full details are in `BUILD_GUIDE.md`, Phase 05.
 | GitHub repository and sign-in | — | Done on 2026-10-20: public repository created with the GitHub CLI; pushes verified |
 | `workflow` token scope for pushing CI files | Phase 14 | Pending. The current tokens are not known to include `workflow`, which GitHub requires for pushing files under `.github/workflows/`. Plan: `gh auth refresh -s workflow` when needed |
 | AWS account access and approval of instance, region, and cost | Phase 15 | Pending |
-| Anything blocking Phase 06 | — | None (Docker Desktop must be running for the tests and the dev database) |
+| Anything blocking Phase 07 | — | None (Docker Desktop must be running for the tests and the dev database) |
 
 <!-- BUILD FLOW 01.10.05 — Next action -->
 ## Next action
 
-Next: Phase 06.
-1. Record Phase 05's commit hash in the commits table above.
-2. Start the services: `.\scripts\dev-services.ps1 up`.
-3. `GET /api/v1/products` with `q` (name contains), `category`, `minPrice`, `maxPrice`, `inStock`, zero-based `page`,
-   `size` (1–100), and an allowlisted `sort`; dynamic predicates with bound parameters (Spring Data JPA
-   Specifications proposed); `id` as the final tie-breaker; response `{content, page, size, totalElements, totalPages}`.
-4. Validation of the query parameters (price range, page and size bounds, unknown sort) as Problem Details.
-5. Tests: combined filters, ordering ties, page boundaries, invalid parameters; then manual searches on the demo data.
-6. Commit `feat(search): add validated product search and pagination`, push, and verify on GitHub.
+Next: Phase 07.
+1. Record Phase 06's commit hash in the commits table above.
+2. Full-stack integration tests: the real application on a random port, real HTTP requests, real MySQL. Cover CRUD,
+   validation, 404s, 409s, combined filters, sort tie-breakers, pagination, transaction rollback, and read-only
+   rejection, end to end.
+3. Example requests: PowerShell and `curl.exe` commands plus an `.http` file for editors that can send it.
+4. `.\mvnw.cmd verify` with the test summary recorded.
+5. Commit `test(backend): verify catalog API and database behavior`, push, and verify on GitHub.

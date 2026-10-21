@@ -11,8 +11,9 @@ Runtime role: None. It documents runtime order; it is not executed.
 # Request Flows — what happens at runtime, step by step
 
 > **Status:** Flow 0 (health check) has been real since Phase 02. Flows 2, 4, and 5 have been real since Phase 05,
-> except their cache steps (`READ-04`, `READ-07`, `WRITE-07`; Phases 09–10). Flow 1 (search) arrives in Phase 06,
-> flows 3 and 6 in Phases 09–10. Steps name the real classes and methods once their phase has landed.
+> except their cache steps (`READ-04`, `READ-07`, `WRITE-07`; Phases 09–10). Flow 1 (search) has been real since
+> Phase 06, except its browser steps (Phase 12). Flows 3 and 6 arrive in Phases 09–10. Steps name the real classes
+> and methods once their phase has landed.
 
 Step IDs describe **runtime order**, not file-creation order (see "Two numbering systems" in `BUILD_GUIDE.md`).
 
@@ -50,16 +51,15 @@ readiness URL in Phase 14.
 ## Flow 1 — Search
 
 Example: `GET /api/v1/products?q=linen&category=HOME&page=0&size=20&sort=price_asc`
-(`price_asc` is a placeholder until Phase 06 fixes the sort names.)
 
 | Step | Where | What happens | Phase |
 |---|---|---|---|
 | SEARCH-01 | Browser | The catalog page builds the query string from the filter state in the URL. A newer search cancels the older request | 12 |
 | SEARCH-02 | Vite proxy or Nginx | Forwards `/api/**` to Spring Boot | 12 / 14 |
-| SEARCH-03 | ProductController | Binds and validates parameters (price range, page and size bounds, sort allowlist). Invalid input → 400 with field errors | 06 |
-| SEARCH-04 | ProductService | Opens a read-only transaction, turns the criteria into predicates with bound parameters, and maps the sort key to an order defined in code plus the `id` tie-breaker | 06 |
-| SEARCH-05 | ProductRepository → MySQL | Runs the page query and the count query, using indexes chosen from measured plans | 06 / 08 |
-| SEARCH-06 | ProductService | Maps entities to response DTOs and builds `{content, page, size, totalElements, totalPages}` | 06 |
+| SEARCH-03 | Spring MVC data binding → `ProductController.searchProducts` | Builds a `ProductSearchRequest` from the query string: converts each value (`ProductSortConverter` for `sort`; a blank value counts as not sent), fills the defaults (page 0, size 20, `newest`), and validates it (`@Valid`: ranges, lengths, `@ValidPriceRange`). Values that cannot be converted → 400 `validation-failed` naming them (the rules run only once every value converts); broken rules → 400 `validation-failed` listing every one. Either way the service is never called and no SQL runs | 06 |
+| SEARCH-04 | `ProductService.searchProducts` | The proxy begins a read-only transaction. `ProductSpecifications.matching` builds the WHERE clause from the filters that were sent (bound parameters; `%`, `_`, and `!` escaped for LIKE). `ProductSort.toSort()` supplies the ORDER BY, always ending with `id` | 06 |
+| SEARCH-05 | `ProductRepository.findAll(specification, pageable)` → MySQL | The page query (`… WHERE … ORDER BY … LIMIT`), then a `COUNT` with the same WHERE clause unless the page itself reveals the total. Until Phase 08 only the primary key and the SKU index exist: this is the baseline that Phase 08 measures | 06 / 08 |
+| SEARCH-06 | `ProductMapper.toResponse`, `PageResponse.from` | Entities become DTOs inside the transaction, the page becomes `{content, page, size, totalElements, totalPages}`, the transaction ends, and Jackson writes `200 OK` | 06 |
 | SEARCH-07 | Browser | Renders results, the result count, filter chips, and pagination | 12 |
 
 Search never touches Redis. That is deliberate (plan §9).
