@@ -45,6 +45,11 @@ spring:
     username: ${MYSQL_USER:catalog}
     password: ${MYSQL_PASSWORD:}
 
+# BUILD FLOW 02.07.05 — Local administration is allowed (added in Phase 05)
+catalog:
+  # The local admin screens (Phase 13) create, edit, and delete products, so development turns writes on.
+  writes-enabled: true
+
 # BUILD FLOW 02.07.03 — More detailed logs for our own code
 logging:
   level:

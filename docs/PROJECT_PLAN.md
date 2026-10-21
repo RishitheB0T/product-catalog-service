@@ -248,7 +248,8 @@ is shown as "page 1" in the UI.
 - Flyway is the schema authority and Hibernate only validates the schema (`ddl-auto=validate`). Never use `ddl-auto=update` in production.
 - Seed demo data only through an explicit dev/test mechanism. Large benchmark seeding is separate and opt-in.
 - **Read-only public deployment.** The public EC2 deployment rejects writes on the server, not just by hiding
-  buttons. Local admin CRUD works. Public editing would first require real server-side authentication.
+  buttons, with 403 Forbidden (decision D-026). Local admin CRUD works. Public editing would first require real
+  server-side authentication.
 - Never put secrets in Vite-exposed environment variables or credentials in the frontend.
 
 <!-- BUILD FLOW 01.01.08 — Search and SQL performance requirements -->

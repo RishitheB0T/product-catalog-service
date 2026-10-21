@@ -13,6 +13,7 @@ package com.example.catalog;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 
 // BUILD FLOW 02.05.01 — @SpringBootApplication: three switches in one annotation
 // An annotation (the @Name syntax) is a label that frameworks read at runtime. This one combines:
@@ -23,7 +24,11 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 //  - @ComponentScan: Spring scans this package (com.example.catalog) and its sub-packages for
 //    classes marked @Component, @Service, @RestController and so on, and creates them.
 //    That is why every class we write later lives under com.example.catalog.
+// BUILD FLOW 02.05.03 — Typed settings (added in Phase 05)
+// @ConfigurationPropertiesScan finds @ConfigurationProperties records under com.example.catalog, such as
+// CatalogProperties (05.01), and registers them as beans filled from the YAML files and environment variables.
 @SpringBootApplication
+@ConfigurationPropertiesScan
 public class CatalogApplication {
 
     // BUILD FLOW 02.05.02 — main: where the JVM starts the program

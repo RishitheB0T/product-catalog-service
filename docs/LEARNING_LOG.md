@@ -187,3 +187,40 @@ Concepts in the order we met them, each with small practice exercises.
 4. Why does `rejectsAnUpdateBasedOnAnOutdatedVersion` change the row with `JdbcTemplate` before saving the entity?
 5. Suppose `hibernate.jdbc.time_zone` were removed and the server ran in UTC while your laptop runs in IST. What
    would happen to timestamps written by one and read by the other?
+
+<!-- BUILD FLOW 01.09.06 — Phase 05 -->
+## Phase 05 — CRUD API
+
+**Concepts**
+- **Layers with one job each.** Controller: HTTP (parse, validate, status codes). Service: rules and the transaction.
+  Repository: SQL. Each can be tested on its own.
+- **DTOs and records.** Request and response records define the API contract. Fields a client must not set don't
+  exist in the request type, which prevents "mass assignment".
+- **Bean Validation.** Annotations such as `@NotBlank` and `@Digits` describe the rules; `@Valid` checks them before the
+  controller runs and reports every broken field at once.
+- **Transactions through a proxy.** `@Transactional` methods begin a transaction on entry, commit on a normal return,
+  and roll back when an unchecked exception escapes. Calls within the same class bypass the proxy (self-invocation).
+  `readOnly = true` skips dirty checking and marks the database transaction read-only.
+- **Flush timing.** Hibernate normally writes at commit; `saveAndFlush` writes now, so database errors appear where
+  the service can translate them.
+- **HTTP status codes.** 200 OK, 201 Created with `Location`, 204 No Content, 400 Bad Request, 403 Forbidden,
+  404 Not Found, 409 Conflict. PUT replaces the whole resource.
+- **Problem Details (RFC 9457).** One standard error shape: `type`, `title`, `status`, `detail`, `instance`, plus
+  extensions such as `errors`.
+- **Check-then-act races.** "Exists? Then insert" can let two requests through; a unique key cannot be fooled. Let the
+  database decide, then translate its answer.
+- **Optimistic locking over HTTP.** The client sends the version it read; a mismatch means someone else saved first,
+  so the server answers 409 and the user reloads instead of silently overwriting.
+- **Fail-safe configuration.** Dangerous abilities (writes) are off unless explicitly enabled.
+- **Test doubles and slices.** A Mockito mock replaces the service, so the web layer is tested quickly and in
+  isolation; real-database tests prove what the mocks cannot (commits, rollbacks, constraints).
+- **`AUTO_INCREMENT` gaps.** Failed inserts and rollbacks consume ids. Ids identify rows; they don't count them.
+
+**Exercises**
+1. Run the README's create–update–delete commands, then send the same `PUT` twice. What happens the second time, and
+   why is that useful?
+2. Remove `@Valid` from `createProduct` (don't commit) and post a negative price. Which layer rejects it now, with
+   which status code? Restore `@Valid`.
+3. Why does `ProductService.createProduct` call `saveAndFlush` instead of `save`?
+4. Why can't the service simply call `findBySku` before inserting, and skip the unique constraint?
+5. With the `prod` profile, send a `POST` whose body is invalid. Is the answer 400 or 403? Explain from `REQUEST_FLOWS.md`.

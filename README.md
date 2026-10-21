@@ -14,9 +14,9 @@ A product catalog built from an empty folder in documented phases, with every fi
 **Spring Boot** REST API over **MySQL**, **Redis** caching for product details, and a **React** storefront that
 uses the real API.
 
-> **Status: Phase 04 of 16 complete.** The backend starts against MySQL, Flyway creates the product schema, and
-> the dev profile loads a 24-product demo catalog. There is no HTTP API for products yet (Phase 05). This README
-> always describes what actually works; anything not built yet is labeled *planned*.
+> **Status: Phase 05 of 16 complete.** The product API reads, creates, updates, and deletes single products, with
+> validation, optimistic locking, and one error format; production settings are read-only. Search arrives in
+> Phase 06. This README always describes what actually works; anything not built yet is labeled *planned*.
 
 <!-- BUILD FLOW 01.04.01 — What works today -->
 ## What works today
@@ -27,7 +27,8 @@ uses the real API.
 | Spring Boot skeleton: build, tests, profiles, health check | Done (Phase 02) |
 | Local MySQL 8.4 and Redis 8.10 in Docker Compose, with a one-command helper | Done (Phase 03) |
 | Product schema (Flyway), JPA entity and repository, dev demo catalog, tests on real MySQL | Done (Phase 04) |
-| Spring Boot API: CRUD, search, validation, errors | Planned (Phases 05–07) |
+| Product API: get, create, update, delete; validation; RFC 9457 errors; read-only production mode | Done (Phase 05) |
+| Search with filters, sorting, and pagination | Planned (Phase 06) |
 | Measured query optimization | Planned (Phase 08) |
 | Redis product-detail cache | Planned (Phases 09–10) |
 | Benchmarks and performance report | Planned (Phase 11) |
@@ -173,6 +174,65 @@ Expected: health without component details, no banner, and no demo data. The `$e
 that terminal. Without the last two options the jar would listen on Spring Boot's default, port 8080 on every network
 interface, which suits a container but not a shared development machine.
 
+<!-- BUILD FLOW 01.04.09 — API (added in Phase 05) -->
+## API
+
+Base path `/api/v1/products`, JSON in and out. Search (`GET /api/v1/products`) arrives in Phase 06.
+
+| Method and path | Success | Typical errors |
+|---|---|---|
+| `GET /api/v1/products/{id}` | 200 with the product | 404 unknown id; 400 non-numeric id |
+| `POST /api/v1/products` | 201 with the product and a `Location` header | 400 invalid fields or JSON; 409 duplicate SKU; 403 read-only |
+| `PUT /api/v1/products/{id}` | 200 with the product (version + 1) | 400; 404; 409 duplicate SKU or outdated version; 403 |
+| `DELETE /api/v1/products/{id}` | 204 | 404; 409 changed meanwhile; 403 |
+
+Creating, updating, and deleting with Windows PowerShell (dev profile running):
+
+```powershell
+$body = @{ sku = "FRM-HOM-101"; name = "Hand-thrown Planter"; description = "Stoneware planter with a drainage hole and a matching saucer."; category = "HOME"; price = 1890; stockQuantity = 12 } | ConvertTo-Json
+$created = Invoke-RestMethod -Method Post -Uri http://localhost:24081/api/v1/products -ContentType "application/json" -Body $body
+
+# PUT sends the complete product plus the version you last read; an outdated version gets 409.
+$update = @{ sku = $created.sku; name = "Hand-thrown Planter, Large"; description = $created.description; category = "HOME"; price = 2190; stockQuantity = 9; version = $created.version } | ConvertTo-Json
+Invoke-RestMethod -Method Put -Uri "http://localhost:24081/api/v1/products/$($created.id)" -ContentType "application/json" -Body $update
+
+Invoke-RestMethod -Method Delete -Uri "http://localhost:24081/api/v1/products/$($created.id)"
+```
+
+**Errors** follow RFC 9457 "Problem Details" (`Content-Type: application/problem+json`). Windows PowerShell 5.1's
+`Invoke-RestMethod` throws on an error status without showing this body, so use `curl.exe` to see it, for example
+`curl.exe -s http://localhost:24081/api/v1/products/999999`.
+
+```json
+{
+  "type": "https://catalog.example/problems/validation-failed",
+  "title": "Validation failed",
+  "status": 400,
+  "detail": "2 fields are invalid.",
+  "instance": "/api/v1/products",
+  "errors": [
+    { "field": "price", "message": "must be greater than or equal to 0.00" },
+    { "field": "sku", "message": "must use only upper-case letters, digits, and hyphens, starting with a letter or digit" }
+  ]
+}
+```
+
+| `type` ends with | Status | Meaning |
+|---|---|---|
+| `validation-failed` | 400 | Fields broke the rules; `errors` lists each one |
+| `malformed-request` | 400 | Not valid JSON for this endpoint: bad syntax, a wrong type, or an unknown category |
+| `invalid-data` | 400 | The database rejected data that passed validation |
+| `product-not-found` | 404 | No product with that id |
+| `duplicate-sku` | 409 | Another product already uses the SKU |
+| `version-conflict` | 409 | Someone else changed the product since you read it; reload and try again |
+| `writes-disabled` | 403 | This deployment is read-only |
+
+Spring's own errors (an unknown path, a wrong method, a non-numeric id) leave `type` out, which means `about:blank`.
+
+**Read-only deployments.** Writes need `catalog.writes-enabled: true`. Only the `dev` profile sets it. The default
+and the `prod` profile keep it `false`, so a public deployment answers every write with 403. The server enforces this
+itself, so hiding the admin buttons in the UI is not the only protection.
+
 ## Tests
 
 Docker Desktop must be running: the tests start their own MySQL 8.4.11 container through Testcontainers, separate
@@ -183,7 +243,11 @@ cd backend
 .\mvnw.cmd verify
 ```
 
-21 tests in three classes:
+43 tests in five classes:
+- `ProductControllerTest` (14), a web-layer test with the service replaced by a Mockito test double: status codes,
+  JSON shapes, validation messages, and every Problem Details type.
+- `ProductServiceTest` (8) runs real transactions on real MySQL: commits, a failed update rolled back completely,
+  outdated versions and duplicate SKUs refused, and every write refused under the `prod` profile.
 - `HealthEndpointTest` (6) starts the real application with no profile, `dev`, and `prod`, and checks over HTTP that
   health is UP, that details appear only with `dev`, that the probes answer, and that `/actuator/env` returns 404.
 - `ProductRepositoryTest` (13) runs against real MySQL: products round-trip, timestamps are stored in UTC, duplicate

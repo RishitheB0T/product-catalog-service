@@ -22,6 +22,12 @@ management:
     health:
       show-details: never
 
+# BUILD FLOW 02.08.03 — The public deployment is read-only (added in Phase 05)
+catalog:
+  # Stated explicitly (it is also the base default) so that a change to application.yml cannot make production
+  # writable by accident. Enabling public editing would first require real server-side authentication (plan §7).
+  writes-enabled: false
+
 # BUILD FLOW 02.08.02 — Quieter startup output
 spring:
   main:

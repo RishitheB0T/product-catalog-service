@@ -44,6 +44,13 @@ spring:
     # Where the versioned migrations live. This is Flyway's default, written down to make it visible.
     locations: classpath:db/migration
 
+# BUILD FLOW 02.06.05 — This application's own settings (added in Phase 05)
+# Read through CatalogProperties (05.01).
+catalog:
+  # Creating, updating, and deleting products. Off unless a profile turns it on, so a deployment that is missing its
+  # settings stays read-only instead of becoming writable (a fail-safe default, decision D-026).
+  writes-enabled: false
+
 # BUILD FLOW 02.06.02 — Actuator: expose only the health endpoint over HTTP
 # Actuator offers many endpoints (env, beans, configprops, heapdump, ...). Several reveal
 # internals such as configuration values or memory contents, so HTTP exposure is limited to

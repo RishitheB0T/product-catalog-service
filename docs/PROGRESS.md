@@ -17,11 +17,11 @@ Runtime role: None. Documentation only.
 
 | Item | Value |
 |---|---|
-| Current phase | **04 — complete** |
-| Next phase | 05 — DTOs, mapping, transactional CRUD API, consistent errors, server-side write switch |
+| Current phase | **05 — complete** |
+| Next phase | 06 — filtered search, stable pagination and sorting, validation, errors |
 | Branch | `main`, tracking `origin/main` |
 | Repository | https://github.com/RishitheB0T/product-catalog-service (public) |
-| Last updated | 2026-10-20 |
+| Last updated | 2026-10-21 |
 
 **Commits so far** (each commit records the hash of the one before it, because a commit cannot contain its own hash)
 
@@ -31,7 +31,8 @@ Runtime role: None. Documentation only.
 | Between 01 and 02 | `225433f` | `docs: connect GitHub remote` | Pushed and verified |
 | Phase 02 | `ee94490` | `chore(backend): bootstrap Spring Boot application` | Pushed and verified |
 | Phase 03 | `71f067c` | `chore(infra): add local MySQL and Redis services` | Pushed and verified |
-| Phase 04 | Recorded at the start of Phase 05 | `feat(database): add product schema and persistence` | Pushed and verified when committed |
+| Phase 04 | `191b5b8` | `feat(database): add product schema and persistence` | Pushed and verified |
+| Phase 05 | Recorded at the start of Phase 06 | `feat(api): implement product CRUD operations` | Pushed and verified when committed |
 
 <!-- BUILD FLOW 01.10.02 — Checks run in Phase 01 -->
 ## Checks run in Phase 01
@@ -92,10 +93,23 @@ All ran on 2026-10-20. Full details, including the first run's six failures, are
 - Packaged jar with `prod` and `SPRING_DATASOURCE_*` environment variables: starts, no details, no demo data.
 
 **Carry-forward items**
-- The JDK warning about a dynamically loaded agent (Mockito) is still open; configure it in Phase 05.
+- The JDK warning about a dynamically loaded agent (Mockito): resolved in Phase 05 (decision D-030).
 - Plain `JdbcTemplate` reports MySQL CHECK violations (error 3819) as `UncategorizedSQLException`; repository (JPA)
   calls get `DataIntegrityViolationException`. Map the latter in Phase 05; remember the former if raw JDBC writes appear.
 - Maven prints two HTTP 401 warnings for repositories declared in Flyway's parent POM; all jars come from Maven Central.
+
+<!-- BUILD FLOW 01.10.09 — Checks run in Phase 05 -->
+## Checks run in Phase 05
+
+All ran on 2026-10-21. Full details are in `BUILD_GUIDE.md`, Phase 05.
+- `.\mvnw.cmd clean verify`: 43 tests, 0 failures (14 controller, 8 service, 13 repository, 6 health, 2 demo data).
+- Manual CRUD against the dev server with `curl.exe`: every status code and Problem Details type behaved as designed.
+- The packaged jar with `prod`: reads 200, and POST, PUT, and DELETE each 403 `writes-disabled`.
+- The README's `Invoke-RestMethod` examples ran verbatim.
+
+**Carry-forward items**
+- The test JVM prints one harmless Class Data Sharing notice caused by the Mockito agent (D-030).
+- Windows PowerShell 5.1's `Invoke-RestMethod` does not show Problem Details bodies on errors; use `curl.exe`.
 
 <!-- BUILD FLOW 01.10.03 — Environment -->
 ## Environment (inspected 2026-10-20)
@@ -123,18 +137,17 @@ All ran on 2026-10-20. Full details, including the first run's six failures, are
 | GitHub repository and sign-in | — | Done on 2026-10-20: public repository created with the GitHub CLI; pushes verified |
 | `workflow` token scope for pushing CI files | Phase 14 | Pending. The current tokens are not known to include `workflow`, which GitHub requires for pushing files under `.github/workflows/`. Plan: `gh auth refresh -s workflow` when needed |
 | AWS account access and approval of instance, region, and cost | Phase 15 | Pending |
-| Anything blocking Phase 05 | — | None (Docker Desktop must be running for the tests and the dev database) |
+| Anything blocking Phase 06 | — | None (Docker Desktop must be running for the tests and the dev database) |
 
 <!-- BUILD FLOW 01.10.05 — Next action -->
 ## Next action
 
-Next: Phase 05.
-1. Record Phase 04's commit hash in the commits table above.
+Next: Phase 06.
+1. Record Phase 05's commit hash in the commits table above.
 2. Start the services: `.\scripts\dev-services.ps1 up`.
-3. Request and response DTOs (records) with Bean Validation, an explicit mapper, `ProductService` with
-   `@Transactional` boundaries, and `ProductController` for `GET /api/v1/products/{id}`, `POST`, `PUT`, `DELETE`.
-4. One consistent error body (decide: `ProblemDetail` or a custom record): field errors, 404, and 409 for
-   `uk_product_sku` and optimistic-lock conflicts. Decide how the client sends the expected version.
-5. Server-side write switch (off in production configuration) and its status code; configure the Mockito agent.
-6. Focused tests (web slice and service), then manual CRUD with `curl.exe` on `127.0.0.1:24081`.
-7. Commit `feat(api): implement product CRUD operations`, push, and verify on GitHub.
+3. `GET /api/v1/products` with `q` (name contains), `category`, `minPrice`, `maxPrice`, `inStock`, zero-based `page`,
+   `size` (1–100), and an allowlisted `sort`; dynamic predicates with bound parameters (Spring Data JPA
+   Specifications proposed); `id` as the final tie-breaker; response `{content, page, size, totalElements, totalPages}`.
+4. Validation of the query parameters (price range, page and size bounds, unknown sort) as Problem Details.
+5. Tests: combined filters, ordering ties, page boundaries, invalid parameters; then manual searches on the demo data.
+6. Commit `feat(search): add validated product search and pagination`, push, and verify on GitHub.

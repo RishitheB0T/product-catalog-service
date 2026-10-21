@@ -73,11 +73,11 @@ history, with a pointer to its replacement).
 - **Trade-off:** Windows editors must handle LF files. VS Code does.
 
 <!-- BUILD FLOW 01.08.02 — Planned decisions -->
-## D-007 · The public deployment is read-only, enforced by the server — Planned (Phases 05, 14, 15)
+## D-007 · The public deployment is read-only, enforced by the server — Accepted (implemented in Phase 05)
 
 - **Decision:** a server-side write switch, on for local development and off in production configuration. Hiding
   buttons is not security.
-- **To decide in Phase 05:** the exact status code and error message for rejected writes.
+- **Implementation:** see D-026 (403 Forbidden, checked in the service, off by default). Phases 14–15 deploy it.
 
 ## D-008 · Cache only product details first; search stays on MySQL — Planned (Phase 09)
 
@@ -241,14 +241,73 @@ history, with a pointer to its replacement).
 - **Trade-off:** touching an unloaded association outside a transaction fails loudly (`LazyInitializationException`)
   instead of silently running extra queries, which is the point.
 
+## D-025 · Errors as RFC 9457 Problem Details — Accepted (Phase 05)
+
+- **Decision:** every error response is a `ProblemDetail` (`application/problem+json`). Our own problem types are
+  named `https://catalog.example/problems/<name>`; Spring's generic errors keep `about:blank`. Validation failures add
+  `errors: [{field, message}]`, sorted by field.
+- **Why:** a standard shape that clients and tools understand, supported natively by Spring 7, whose
+  `ResponseEntityExceptionHandler` renders Spring MVC's own errors in the same format. `type` is a stable
+  machine-readable identifier; `detail` is for people.
+- **Safety:** Jackson's raw parse messages, which name Java classes, are replaced by neutral text; stack traces are
+  logged but never returned.
+- **Alternatives:** a custom error record (simpler, but non-standard); Spring Boot's default error JSON (a different
+  shape from our own errors).
+
+## D-026 · Read-only mode: 403 from the service layer, off by default — Accepted (Phase 05)
+
+- **Decision:** `catalog.writes-enabled` is `false` by default and in `prod`, `true` only in `dev`. `ProductService`
+  checks it at the start of every write and throws `WritesDisabledException`, answered with **403 Forbidden**
+  (`writes-disabled`).
+- **Why the service:** every write path goes through it, so no controller or future endpoint can forget the check.
+- **Why 403:** the server understood the request but refuses to carry it out here. 405 would claim the resource never
+  supports the method; 503 would suggest a temporary outage.
+- **Why off by default:** a deployment that is missing its settings must stay read-only, not become writable.
+- **Trade-off:** validation runs before the check, so an invalid request gets 400 even in read-only mode.
+
+## D-027 · Optimistic locking in the API: version in the PUT body, 409 on conflict — Accepted (Phase 05)
+
+- **Decision:** responses include `version`; `PUT` must send it back. The service compares it with the stored version
+  (409 naming both numbers), and Hibernate's `@Version` catches a change committed between our read and our write (409).
+- **Alternative:** HTTP conditional requests (`ETag` and `If-Match`, answered with 412 Precondition Failed). That is
+  the standard HTTP mechanism, but the requirements ask for 409 conflicts, and a body field is simpler for the admin
+  UI. `If-Match` could be added later.
+- **Trade-off:** `DELETE` does not take a version, so deleting a product that someone has just edited still succeeds,
+  unless the edit commits between the delete's read and its write.
+
+## D-028 · Separate request records for create and update — Accepted (Phase 05)
+
+- **Decision:** `ProductCreateRequest`, `ProductUpdateRequest` (the same rules plus `version`), and
+  `ProductResponse`. No entity crosses the controller boundary.
+- **Alternatives:** one record with validation groups, or a shared interface carrying the annotations. Both remove
+  duplication but are harder to read and explain.
+- **Trade-off:** the validation annotations are written twice and must be kept in step.
+
+## D-029 · The service turns database errors into domain errors — Accepted (Phase 05)
+
+- **Decision:** `ProductService` catches a `DataIntegrityViolationException` that names `uk_product_sku` and throws
+  `DuplicateSkuException`; it turns `ObjectOptimisticLockingFailureException` into `VersionConflictException`. The web
+  layer only knows domain exceptions.
+- **Why not check first?** "Does this SKU exist?" followed by an insert is a check-then-act race: two requests can both
+  see "free". The unique key cannot be fooled, so the database decides and the service translates its answer.
+- **Trade-off:** matching the constraint name in MySQL's message ties the code to that name; `ProductServiceTest`
+  fails if the constraint is ever renamed.
+
+## D-030 · Mockito as a Java agent in tests — Accepted (Phase 05)
+
+- **Context:** since Phase 02 the JDK warned that Mockito attached its agent while tests were running, and that future
+  JDKs will block this.
+- **Decision:** `maven-dependency-plugin`'s `properties` goal plus Surefire's
+  `argLine -javaagent:${org.mockito:mockito-core:jar}` start the test JVM with Mockito as a regular agent.
+- **Result:** the dynamic-agent warnings are gone. One harmless JVM notice remains ("Sharing is only supported for boot
+  loader classes…"): the agent extends the boot class path, which switches off part of Class Data Sharing, a startup
+  optimization, in the test JVM.
+
 <!-- BUILD FLOW 01.08.03 — Open questions -->
 ## Open questions (each is decided in its phase)
 
 | Question | Phase |
 |---|---|
-| Error body format: Spring's `ProblemDetail` (RFC 9457) or a custom record | 05 |
-| Status code for writes rejected in read-only mode | 05 |
-| How the client sends the expected version: a body field or an `If-Match` header | 05 |
 | Search implementation (Spring Data JPA Specifications proposed) | 06 |
 | Cache code style (explicit service code proposed) and eviction mechanism (an after-commit listener proposed) | 09–10 |
 | Routing: React Router or a small hand-written router | 12 |

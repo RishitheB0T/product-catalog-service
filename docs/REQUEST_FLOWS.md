@@ -10,8 +10,9 @@ Runtime role: None. It documents runtime order; it is not executed.
 
 # Request Flows — what happens at runtime, step by step
 
-> **Status:** Flow 0 (health check) is implemented (Phase 02). Flows 1–6 are planned: each step names the phase
-> that will implement it, and is updated to name the real classes and methods when that phase lands.
+> **Status:** Flow 0 (health check) has been real since Phase 02. Flows 2, 4, and 5 have been real since Phase 05,
+> except their cache steps (`READ-04`, `READ-07`, `WRITE-07`; Phases 09–10). Flow 1 (search) arrives in Phase 06,
+> flows 3 and 6 in Phases 09–10. Steps name the real classes and methods once their phase has landed.
 
 Step IDs describe **runtime order**, not file-creation order (see "Two numbering systems" in `BUILD_GUIDE.md`).
 
@@ -23,7 +24,7 @@ Step IDs describe **runtime order**, not file-creation order (see "Two numbering
 | `WRITE-xx` | Create, update, and delete, including the rollback branch (`R`) |
 
 <!-- BUILD FLOW 01.07.01 — Where requests travel -->
-## Where requests travel (planned)
+## Where requests travel
 
 - **Development (Phases 03–13):** browser → Vite dev server on `localhost:24173` → proxies `/api` → Spring Boot on
   `127.0.0.1:24081` (running directly on Windows with the `dev` profile) → MySQL on `127.0.0.1:24306` and Redis on
@@ -49,7 +50,7 @@ readiness URL in Phase 14.
 ## Flow 1 — Search
 
 Example: `GET /api/v1/products?q=linen&category=HOME&page=0&size=20&sort=price_asc`
-(`HOME` and `price_asc` are placeholders until Phases 04 and 06 fix the real values.)
+(`price_asc` is a placeholder until Phase 06 fixes the sort names.)
 
 | Step | Where | What happens | Phase |
 |---|---|---|---|
@@ -70,14 +71,14 @@ Example: `GET /api/v1/products/42`
 
 | Step | Where | What happens | Phase |
 |---|---|---|---|
-| READ-01 | Browser | The detail page requests product 42 | 13 |
-| READ-02 | ProductController | Parses `{id}` and calls the service | 05 |
-| READ-03 | ProductService | Receives the id. If caching is enabled, it asks the detail cache first | 05 / 09 |
+| READ-01 | Client (the detail page from Phase 13) | Sends `GET /api/v1/products/42` | 05 / 13 |
+| READ-02 | `ProductController.getProduct` | Spring converts `{id}` to a `long` (non-numeric → 400) and calls the service | 05 |
+| READ-03 | `ProductService.getProduct` | The proxy begins a read-only transaction. From Phase 09 the service asks the detail cache first | 05 / 09 |
 | READ-04 | Redis | `GET catalog:v1:product:42`. Hit → `READ-04H`. Miss → `READ-05`. Error → `READ-04X` | 09 / 10 |
-| READ-05 | ProductRepository → MySQL | `SELECT … WHERE id = 42`. No row → 404, and nothing is cached | 05 |
-| READ-06 | Mapper | Entity → `ProductResponse` DTO | 05 |
+| READ-05 | `ProductRepository.findById` → MySQL | `SELECT … FROM product WHERE id = 42`. No row → `ProductNotFoundException` → 404 `product-not-found`, and nothing is cached | 05 |
+| READ-06 | `ProductMapper.toResponse` | Entity → `ProductResponse` inside the transaction, which then ends | 05 |
 | READ-07 | Redis | `SET catalog:v1:product:42 <json>` with a 60-second TTL | 09 |
-| READ-08 | Controller → browser | `200 OK` with JSON | 05 |
+| READ-08 | Controller → client | `200 OK` with JSON | 05 |
 
 ## Flow 3 — Product detail, cache hit
 
@@ -98,20 +99,26 @@ Example: `PUT /api/v1/products/42`
 
 | Step | Where | What happens | Phase |
 |---|---|---|---|
-| WRITE-01 | Browser (local admin) | Sends the edited product, including the `version` it last read | 13 |
-| WRITE-02 | Server write switch | If writes are disabled (the public deployment), the request is rejected with a clear error and nothing changes | 05 |
-| WRITE-03 | ProductController | Validates the body. Invalid → 400 with field errors | 05 |
-| WRITE-04 | ProductService | A `@Transactional` method starts a database transaction | 05 |
-| WRITE-05 | ProductRepository → MySQL | Loads row 42 (missing → 404), compares the client's version (stale → 409), and applies the changes | 05 |
-| WRITE-06 | Commit | Hibernate sends `UPDATE … WHERE id = 42 AND version = 7`. If a concurrent write already changed the version, no row matches → 409. Otherwise MySQL commits | 05 |
+| WRITE-01 | Client (the local admin from Phase 13) | Sends the complete product plus the `version` it last read | 05 / 13 |
+| WRITE-02 | Spring MVC: Jackson and Bean Validation | Reads the JSON into `ProductUpdateRequest` and checks it (`@Valid`). Unreadable → 400 `malformed-request`; invalid → 400 `validation-failed`. The service is never called | 05 |
+| WRITE-03 | `ProductController.updateProduct` | Calls the service | 05 |
+| WRITE-04 | `ProductService.updateProduct` | The proxy begins a transaction. `requireWritesEnabled` refuses the request with 403 `writes-disabled` when `catalog.writes-enabled` is false; nothing is written | 05 |
+| WRITE-05 | `ProductRepository.findById` → MySQL | Loads row 42 (missing → 404). The request's version must equal the stored one (otherwise 409 `version-conflict`). `ProductMapper.applyUpdate` copies the new values | 05 |
+| WRITE-06 | `saveAndFlush` → MySQL, then commit | Hibernate sends `UPDATE … SET …, version = 8 WHERE id = 42 AND version = 7`. No matching row (a concurrent change) → 409 `version-conflict`; another product's SKU → 409 `duplicate-sku`. Otherwise the method returns and the transaction commits | 05 |
 | WRITE-07 | After-commit listener | Deletes `catalog:v1:product:42` (for create, the generated id). If that fails, it is logged and counted, and the committed write is still reported as a success | 10 |
-| WRITE-08 | Controller → browser | `201 Created` with `Location` (create), `200 OK` (update), or `204 No Content` (delete) | 05 |
+| WRITE-08 | Controller → client | `200 OK` with the new state (update), `201 Created` with `Location` (create), or `204 No Content` (delete) | 05 |
+
+Note on the order: request validation (`WRITE-02`) happens before the write switch (`WRITE-04`), so an invalid
+request to a read-only deployment receives 400, not 403.
 
 ## Flow 5 — Rollback
 
-`WRITE-01` to `WRITE-05` as above, then something fails, for example a duplicate SKU violating the unique
-constraint. At **`WRITE-06R`** the transaction rolls back, so MySQL keeps the old data. After-commit work never
-runs, so the cache is untouched. The client receives a clear error (409 for a duplicate SKU). (Phases 05 and 10)
+`WRITE-01` to `WRITE-05` as above; then at `WRITE-06` MySQL rejects the change, for example because the new SKU
+belongs to another product (error 1062). `ProductService` translates the `DataIntegrityViolationException` into
+`DuplicateSkuException`, which leaves the `@Transactional` method, so at **`WRITE-06R`** the proxy rolls the
+transaction back: every change made in it is undone, including fields such as the name that were valid on their own
+(`ProductServiceTest.failedUpdateIsRolledBackCompletely` proves this). After-commit work never runs, so from Phase 10
+the cache is untouched. `ApiExceptionHandler` answers 409 `duplicate-sku`.
 
 <!-- BUILD FLOW 01.07.05 — Known limits -->
 ## Known limit (preview of Phase 10)
