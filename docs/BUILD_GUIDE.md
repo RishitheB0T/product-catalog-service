@@ -670,3 +670,114 @@ Test thread(s) ─► RestTestClient ─► real TCP connection to localhost:<ra
    ◄─ status, headers, JSON (or Problem Details) ◄─ checked with expectStatus / expectHeader / jsonPath
 Races: 10 threads ─► latch released ─► 10 requests at once ─► one commits; the database stops the other nine
 ```
+
+<!-- BUILD FLOW 01.05.10 — Phase 08 -->
+## Phase 08 — Measured query optimization
+
+**What we had before.** Correct search with no indexes beyond the primary key and the unique SKU, tested on a few
+dozen rows.
+
+**What we add.**
+- A separate benchmark database (`catalog_bench`) with 100,000 generated, reproducible products, loaded by a
+  `bench`-only seeder.
+- Tooling to capture the SQL the application really sends and to measure it with `EXPLAIN ANALYZE`.
+- Measurements before and after migration `V2`, which adds four indexes chosen from those plans.
+- "What if" checks per index, and `docs/QUERY_OPTIMIZATION.md`.
+
+**Why.** Indexes are a trade: faster reads, slower writes, more storage. Choosing them from measured plans, and
+proving that results did not change, is the difference between optimizing and guessing.
+
+**Files in order**
+
+| BUILD FLOW | File | Role |
+|---|---|---|
+| 08.01 | `backend/src/main/resources/application-bench.yml` | The `bench` profile |
+| 08.02 | `scripts/bench-db.ps1` | Benchmark database and query log |
+| 08.03 | `backend/src/main/java/com/example/catalog/bench/BenchmarkProperties.java` | `catalog.bench.*` settings |
+| 08.04 | `backend/src/main/java/com/example/catalog/bench/BenchmarkProductGenerator.java` | Reproducible products |
+| 08.05 | `backend/src/main/java/com/example/catalog/bench/BenchmarkDataSeeder.java` | Loads them (bench only) |
+| 08.06 | `backend/src/test/java/com/example/catalog/bench/BenchmarkProductGeneratorTest.java` | Determinism, validity, shape |
+| 08.07 | `backend/src/test/java/com/example/catalog/bench/BenchmarkDataSeederTest.java` | Loading rules |
+| 08.08 | `benchmarks/queries/search-queries.sql` | The captured SQL |
+| 08.09 | `scripts/measure-queries.ps1` | `EXPLAIN ANALYZE` and result fingerprints |
+| 08.10 | `benchmarks/query-plans/before-v2.txt` | Measurements before (generated) |
+| 08.11 | `backend/src/main/resources/db/migration/V2__add_search_indexes.sql` | The four indexes |
+| 08.12 | `benchmarks/query-plans/after-v2.txt` | Measurements after, compared (generated) |
+| 08.13 | `benchmarks/queries/index-alternatives.sql` | "What if" variants with index hints |
+| 08.14 | `benchmarks/query-plans/index-alternatives.txt` | Their measurements (generated) |
+| 08.15 | `docs/QUERY_OPTIMIZATION.md` | Method, evidence, decisions |
+
+Modified: documentation only (README, this guide, FILE_GUIDE, REQUEST_FLOWS `SEARCH-05`, DECISIONS D-037 to D-041,
+LEARNING_LOG, PROGRESS).
+
+**Relevant syntax**
+- *Spring*: a profile-specific YAML file; `@ConfigurationProperties` with `@DefaultValue` and `@Validated`;
+  `TransactionTemplate.executeWithoutResult(…)`; `JdbcTemplate.batchUpdate(sql, items, batchSize, setter)`;
+  `--spring.flyway.target=1` to stop Flyway at a version.
+- *Java*: `java.util.Random(seed)`, `String.format(Locale.ROOT, …)`, `Stream.generate(…).limit(n)`,
+  `MessageDigest` (SHA-256), `HexFormat`, Bean Validation's `Validation.buildDefaultValidatorFactory()` in a unit test.
+- *MySQL*: `EXPLAIN ANALYZE`, `ANALYZE TABLE`, `ALTER TABLE … ADD INDEX …, ALGORITHM = INPLACE, LOCK = NONE`,
+  the general query log (`SET GLOBAL general_log`), `IGNORE INDEX`, `FORCE INDEX`, and `/*+ SET_VAR(…) */` hints,
+  `information_schema.statistics`, `mysql.innodb_index_stats`.
+- *PowerShell*: running SQL inside the container through standard input; `[ordered]@{}`; SHA-256 with .NET.
+
+**Commands we ran** (PowerShell)
+
+| Command | Purpose |
+|---|---|
+| `netsh interface ipv4 show excludedportrange protocol=tcp`, `Get-NetTCPConnection`, a search of other projects' configs | Check that port 24083 is free for the `bench` profile |
+| `.\mvnw.cmd test "-Dtest=BenchmarkProductGeneratorTest"` | Record the dataset fingerprint (see the findings) |
+| `.\mvnw.cmd -B -ntp clean verify` | Build and run all tests, before and after V2 existed |
+| `.\scripts\bench-db.ps1 create`, `status`, `reset -Force`, `drop -Force` | Manage the benchmark database |
+| `java -jar … --spring.profiles.active=bench` (and `--spring.flyway.target=1`) | Migrate and load the benchmark data |
+| `.\scripts\bench-db.ps1 log-on`, 8 `curl.exe` searches, `log-show`, `log-off` | Capture the application's SQL |
+| `.\scripts\measure-queries.ps1 -Label before-v2`, `-Label after-v2 -Baseline before-v2`, `-Label index-alternatives -QueryFile …` | Measure |
+| One scripted run: fresh database, V1 only, load and measure; load again; V2; two loads with the indexes; measure | Reproduce everything from scratch and time loads with and without the indexes |
+
+**Expected behavior.** Large speed-ups only where an index can deliver rows in order or narrow them; no change where
+it cannot; identical results everywhere.
+
+**Actual checks** (2026-10-22)
+
+| Check | Result |
+|---|---|
+| Dataset | 100,000 products valid by the API's rules; shares as designed; fingerprint `6b78f508…462c367f`, pinned by a test |
+| `clean verify` before V2 existed | 91 tests, 0 failures (85 earlier, 4 generator, 2 seeder) |
+| First benchmark load | Flyway V1 in 95 ms; 100,000 products in 3,780 ms |
+| SQL capture | 8 requests produced 15 statements, 12 distinct; the no-match search ran no count, as Phase 06 predicted |
+| Before V2 | Every page query read all 100,000 rows and sorted: 37–49 ms; the deep page 89–91 ms |
+| V2 | Applied online over 100,000 rows in 3.4 s |
+| After V2 | Page queries 0.08–0.66 ms (73–483× faster); category count 5.8×; other counts and the deep page unchanged; the no-match search 44.5 → 193 ms; every result identical |
+| "What if" | Without `(category, created_at)`: 0.273 ms (reads 97 entries); the no-match search without `(created_at)`: 44.4 ms; with `prefer_ordering_index=off`: 186 ms; the deep page forced onto `(created_at)`: 170 ms |
+| Full reproduction run | Fresh database with `--spring.flyway.target=1`, through V2: identical fingerprints throughout. Loads took 3.8–5.6 s without and 4.6–6.4 s with the indexes; index space 12.1 MB when built in bulk, 18.1 MB when grown row by row |
+| `clean verify` with V2 | 91 tests, 0 failures; the test container applied V1 and V2 ("now at version v2"); 11 connection pools for the run |
+
+Mistakes and findings on the way:
+- **Recording the fingerprint.** It can only be learned from a first generation, so the test first ran with a
+  placeholder. As intended, that one test failed and printed the real value, which the test now pins. The other three
+  generator tests passed in that same run.
+- **A machine path leaked into a measurement file.** PowerShell variable names ignore case: `$queryFile` overwrote the
+  parameter `$QueryFile`, and the file header showed the full local path. It was noticed in the output and fixed with
+  a distinct name before any file was committed; the pre-commit check also scans for such paths.
+- **Stale sizes.** MySQL caches table statistics, so the first "after" header still showed the index size from before
+  V2. The script now runs `ANALYZE TABLE` before measuring.
+- **A helper script error caught before running.** My first draft of the full-run helper would have captured log
+  output into a function's return value (a PowerShell trap). It was fixed before the run, and given a `finally` that
+  stops the Java process it started even if a step fails.
+- **Every number re-measured from scratch.** `before-v2.txt` was regenerated during the full reproduction run, after
+  the script fixes above. The first measurement agreed within a few milliseconds (home page 42.3 ms then, 42.2 ms
+  now), with identical fingerprints.
+- **The no-match regression is real and kept** (D-041). It was found by measuring every query, not only the ones
+  expected to improve.
+- **Write cost was not measurable** with a few 100,000-row loads: the timings with and without the indexes overlap.
+  The build time (3.4 s) and the space (12–18 MB) are what was measured.
+
+**How the pieces connect**
+
+```text
+bench-db.ps1 create ─► catalog_bench ─► java -jar … bench ─► Flyway V1 (V2) ─► BenchmarkDataSeeder (100,000 rows)
+8 API requests ─► general query log ─► search-queries.sql (12 statements)
+measure-queries.ps1 ─► ANALYZE TABLE ─► per query: warm-up, EXPLAIN ANALYZE ×3 (median), SHA-256 of the result
+   before-v2.txt ─► V2__add_search_indexes.sql ─► after-v2.txt (compared: identical) ─► index-alternatives.txt
+   ─► docs/QUERY_OPTIMIZATION.md
+```

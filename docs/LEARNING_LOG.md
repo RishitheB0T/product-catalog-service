@@ -296,3 +296,43 @@ Concepts in the order we met them, each with small practice exercises.
    application between them? Add one property to one of them and count the applications in the test log.
 5. Open `backend/api-examples.http` in VS Code with the REST Client extension and send the requests in order. Then
    send "Create" twice in a row. What do you get the second time, and why?
+
+<!-- BUILD FLOW 01.09.09 — Phase 08 -->
+## Phase 08 — Measured query optimization
+
+**Concepts**
+- **Measure, then change, then measure again.** An index is chosen because a plan shows the work it removes, and kept
+  only if the measurement after the change confirms it, with identical results.
+- **Reproducible test data.** A seeded random generator with integer maths and a fixed reference date produces the
+  same data everywhere; a fingerprint (a hash over all of it) proves it stayed the same.
+- **`EXPLAIN` vs. `EXPLAIN ANALYZE`.** `EXPLAIN` shows the plan the optimizer intends, with estimates.
+  `EXPLAIN ANALYZE` runs the query and adds the actual time and the actual rows of every step.
+- **How a B-tree index helps.** It can narrow rows (seek to a value or range), deliver rows in order (so `LIMIT` can
+  stop early), or answer from the index alone (a covering index). InnoDB appends the primary key to every secondary
+  index.
+- **Composite indexes.** Put equality columns first, then the range or sort column. The leftmost-prefix rule means
+  `(category, price)` serves `category` alone, but never `price` alone.
+- **Sort direction.** One index can be read forwards or backwards, but not "mixed": `price DESC, id ASC` needs a sort
+  step.
+- **Selectivity.** A condition that keeps 93 % of rows (in stock) is not worth an index. One that keeps 0.02 % is.
+- **Leading wildcards.** `LIKE '%term%'` cannot seek in a B-tree: the matching values are scattered through the index.
+- **The optimizer can bet wrong.** With `ORDER BY … LIMIT`, walking an ordered index pays off when matches are common
+  and costs a full walk when they are rare. Measure the rare case too.
+- **Counts and offsets.** `COUNT` must visit every matching row, and `OFFSET n` must produce n rows only to skip them.
+  Indexes help neither much.
+- **Costs of an index.** Space (it depends on how the index was built), extra work on every write, and an online build
+  when it is added to a live table.
+- **Migrations are history.** A schema change after V1 is a new migration (V2). One DDL statement is atomic in
+  MySQL 8; several are not.
+
+**Exercises**
+1. In `before-v2.txt`, find the step that reads all 100,000 rows in category-newest. Which step in `after-v2.txt`
+   replaced it, and how many rows does that step read?
+2. Why does `ix_product_category_created_at` not help the home page? Use the leftmost-prefix rule.
+3. Explain from the plans why `?q=linen` became 73× faster while `?q=zebra` became 4× slower. What would you measure
+   before deciding to fix it?
+4. Why is `price DESC, id DESC` a single backward read of `ix_product_category_price`? What would change if the
+   tie-breaker were `id ASC`?
+5. Run `.\scripts\measure-queries.ps1 -Label my-run -Baseline after-v2` (the bench database must be loaded). Are the
+   fingerprints identical? Are the times? What does that tell you about comparing single timings? Delete
+   `benchmarks/query-plans/my-run.txt` afterwards; it is not part of the recorded evidence.

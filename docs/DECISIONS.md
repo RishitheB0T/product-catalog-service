@@ -391,6 +391,70 @@ history, with a pointer to its replacement).
 - **Trade-off:** each distinct test configuration starts another application with its own connection pool against the
   one test MySQL. The run now holds 10 pools of up to 10 connections each; MySQL allows 151 connections by default.
 
+## D-037 · A separate benchmark database and a `bench` profile — Accepted (Phase 08)
+
+- **Decision:** benchmark data lives in `catalog_bench`, a second database in the development MySQL container, created
+  by `scripts/bench-db.ps1 create`. The `bench` profile (`application-bench.yml`, port 24083, read-only) points the
+  application at it; Flyway owns its schema exactly as in the other environments.
+- **Why:** the 24-product demo catalog stays small and readable for development (plan §8), and measurements never
+  touch it. One MySQL server means nothing new to install, and the same image as everywhere else.
+- **Alternatives:** loading 100,000 products into `catalog` (the storefront would show them in development); a second
+  MySQL container (more memory and one more port for no extra insight).
+- **Trade-off:** creating the database and granting the application user rights on it needs the MySQL root account,
+  which the script uses inside the container only.
+
+## D-038 · Generated, fingerprinted benchmark data — Accepted (Phase 08)
+
+- **Decision:** `BenchmarkProductGenerator` builds products from `java.util.Random` with a fixed seed, integer maths
+  only, and a fixed reference date. `BenchmarkDataSeeder` (`bench` profile only) loads them into an empty table in one
+  transaction. A test pins the fingerprint of the default dataset (SHA-256 over every field of all 100,000 products)
+  and checks every product against the API's own validation rules.
+- **Why:** measurements can only be compared on identical data. A seed makes the data reproducible on any machine;
+  the fingerprint makes an accidental change to the generator visible.
+- **Alternatives:** a recursive SQL query generating rows inside MySQL (fast, but harder to read and to test); a
+  downloaded public dataset (licensing and size questions, and it would not match our categories).
+- **Trade-off:** the generator ships in the application jar. Like the demo loader, it is inactive unless its profile
+  is chosen explicitly.
+
+## D-039 · How queries are measured — Accepted (Phase 08)
+
+- **Decision:** capture the SQL the application really sends (MySQL's general query log), then measure each statement
+  with `EXPLAIN ANALYZE`: one warm-up run, then three timed runs whose median counts. Fingerprint every result with
+  SHA-256, and fail the comparison if any result differs. Keep "what if" questions as index-hinted variants in a
+  separate file.
+- **Why:** the plan explains the time; the fingerprints prove an optimization did not change behavior; the median of
+  warm runs keeps single noisy runs from deciding anything.
+- **Limits:** times are server-side only, on one laptop, one query at a time, with data in memory. Phase 11 measures
+  whole HTTP requests.
+
+## D-040 · Four search indexes in V2, chosen from measured plans — Accepted (Phase 08)
+
+- **Decision:** `V2__add_search_indexes.sql` adds `(created_at)`, `(category, created_at)`, `(category, price)`, and
+  `(price)` in one atomic, online `ALTER TABLE` (`ALGORITHM = INPLACE, LOCK = NONE`).
+- **Why:** before V2, every page query read all 100,000 rows and sorted them (37–49 ms). Each index lets one storefront
+  request read its rows already in order and stop after 20 (0.08–0.66 ms, 73–483× faster), with identical results
+  (`docs/QUERY_OPTIMIZATION.md`).
+- **Not added:** an index on `name` (a contains search cannot use one), on `stock_quantity` (93 % of products are in
+  stock), a separate `(category)` index (the composite indexes cover it by the leftmost-prefix rule), and
+  `(price, stock_quantity)` (it would break the `price, id` order the page query needs).
+- **Trade-off:** 12–18 MB of index space on 100,000 rows, and more work for every insert and every update of an
+  indexed column. A catalog is read far more often than written.
+
+## D-041 · Known slow cases, accepted for now — Accepted (Phase 08)
+
+- **Decision:** three measured weaknesses stay as they are:
+  - **Counts** still visit every matching row (8–33 ms, more than the pages they accompany).
+  - **The deepest pages** cost about 0.1 s, bounded by the page limit (D-033).
+  - **A name search for a word that matches nothing** got slower: 44.5 → 193 ms. The optimizer walks the
+    `created_at` index hoping to find matches early.
+- **Why:** each remedy changes behavior or adds machinery, and its value should first be measured end to end (Phase 11):
+  - capped or cached counts, or "next page" without a total;
+  - keyset pagination;
+  - a FULLTEXT index or a search engine, which change the matching rules.
+
+  A per-statement optimizer setting was measured and does not help.
+- **Revisit:** when Phase 11 shows these requests matter, or the catalog grows beyond about 100,000 products.
+
 <!-- BUILD FLOW 01.08.03 — Open questions -->
 ## Open questions (each is decided in its phase)
 

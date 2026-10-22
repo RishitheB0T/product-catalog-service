@@ -14,10 +14,11 @@ A product catalog built from an empty folder in documented phases, with every fi
 **Spring Boot** REST API over **MySQL**, **Redis** caching for product details, and a **React** storefront that
 uses the real API.
 
-> **Status: Phase 07 of 16 complete.** The product API searches the catalog (filters, sorting, pagination) and reads,
+> **Status: Phase 08 of 16 complete.** The product API searches the catalog (filters, sorting, pagination) and reads,
 > creates, updates, and deletes single products, with validation, optimistic locking, and one error format; production
-> settings are read-only. 85 tests cover it, including full-stack tests over real HTTP. This README always describes
-> what actually works; anything not built yet is labeled *planned*.
+> settings are read-only. Search queries were measured on 100,000 products and indexed from the measured plans.
+> 91 tests cover it, including full-stack tests over real HTTP. This README always describes what actually works;
+> anything not built yet is labeled *planned*.
 
 <!-- BUILD FLOW 01.04.01 — What works today -->
 ## What works today
@@ -31,7 +32,7 @@ uses the real API.
 | Product API: get, create, update, delete; validation; RFC 9457 errors; read-only production mode | Done (Phase 05) |
 | Search with filters, sorting, and pagination; validated parameters | Done (Phase 06) |
 | Full-stack API tests over real HTTP, including simultaneous requests; example requests | Done (Phase 07) |
-| Measured query optimization | Planned (Phase 08) |
+| Measured query optimization: 100,000-product benchmark data, `EXPLAIN ANALYZE` before and after, search indexes (V2) | Done (Phase 08) |
 | Redis product-detail cache | Planned (Phases 09–10) |
 | Benchmarks and performance report | Planned (Phase 11) |
 | React storefront and local admin | Planned (Phases 12–13) |
@@ -84,7 +85,7 @@ GitHub Actions. The exact versions, verified against official sources on 2026-10
 | `frontend/` | React + Vite storefront | Phase 12 |
 | `infra/` | Compose files, Nginx configuration, EC2 helpers | Phase 03 |
 | `scripts/` | PowerShell helpers (Bash only for Linux targets) | Phase 03 |
-| `benchmarks/` | Seed tooling, k6 scripts, raw results, query plans | Phase 08 |
+| `benchmarks/` | Captured search SQL and measured query plans (Phase 08); k6 scripts and results (Phase 11) | Phase 08 |
 | `docs/` | Plan, guides, decisions, evidence | Phase 01 |
 | `.github/workflows/` | Continuous integration | Phase 14 |
 
@@ -111,6 +112,7 @@ Local services listen on `127.0.0.1` only, so other devices on the network canno
 |---|---|---|---|
 | Backend, `dev` profile | `127.0.0.1:24081` | — (runs directly on Windows) | Phase 03 |
 | Backend jar, manual production-style run | `127.0.0.1:24082` (passed on the command line) | — | Phase 03 |
+| Backend, `bench` profile (100,000-product measurement database) | `127.0.0.1:24083` | — | Phase 08 |
 | MySQL 8.4 | `127.0.0.1:24306` | 3306 | Phase 03 |
 | Redis 8.10 | `127.0.0.1:24379` | 6379 | Phase 03 |
 | Vite dev server | 24173 (planned) | — | Phase 12 |
@@ -275,7 +277,7 @@ cd backend
 .\mvnw.cmd verify
 ```
 
-85 tests in eight classes. The first two start the whole application on a random port and call it over real HTTP,
+91 tests in ten classes. The first two start the whole application on a random port and call it over real HTTP,
 exactly as a client would:
 - `ProductApiIntegrationTest` (15): a product from creation to deletion, the exact JSON shape, fields a client may not
   set, every error type (400, 404, 405, 409, 415), a rollback seen through the API, Unicode text, ten simultaneous
@@ -297,11 +299,27 @@ exactly as a client would:
   SKUs and six kinds of invalid rows are rejected by the database itself, and optimistic locking refuses an update
   based on an outdated version.
 - `DemoDataLoaderTest` (2) checks that the demo catalog loads only with `dev`, only into an empty table, and only once.
+- `BenchmarkProductGeneratorTest` (4) checks that the benchmark data is reproducible (a pinned fingerprint for all
+  100,000 products), valid by the API's own rules, and shaped like a real catalog; `BenchmarkDataSeederTest` (2)
+  checks that it loads only with the `bench` profile, only into an empty table, and only once.
 
 ## Performance evidence
 
-No measurements yet. Numbers will appear here only after Phases 08 and 11 measure them, together with the method
-and the raw results.
+**Search queries (Phase 08)**, measured inside MySQL on 100,000 generated products with `EXPLAIN ANALYZE` (median of
+three warm runs), before and after the four indexes of migration V2. Every query returned exactly the same rows.
+
+| Request | Before | After |
+|---|---:|---:|
+| Home page, newest first (`GET /api/v1/products`) | 42.2 ms | 0.087 ms |
+| Category page, newest first (`?category=HOME`) | 37.9 ms | 0.136 ms |
+| Category page by price (`?category=HOME&sort=price_asc`) | 37.8 ms | 0.084 ms |
+| Price range in stock (`?minPrice=1000&maxPrice=2000&inStock=true&sort=price_asc`) | 41.3 ms | 0.112 ms |
+| Name search, common word (`?q=linen`) | 48.6 ms | 0.664 ms |
+| Name search, no match (`?q=zebra`) | 44.5 ms | **193 ms (slower)** |
+
+Counts and the deepest page barely changed, and the no-match search got slower; why, and what each index costs, is in
+[`docs/QUERY_OPTIMIZATION.md`](docs/QUERY_OPTIMIZATION.md), with the raw plans in `benchmarks/query-plans/` and the
+steps to reproduce them. Whole HTTP requests, and the Redis cache, are measured with k6 in Phase 11 (*planned*).
 
 ## Deployment status
 
@@ -319,4 +337,5 @@ instance, region, and cost.
 | [`docs/FILE_GUIDE.md`](docs/FILE_GUIDE.md) | Every file and its role |
 | [`docs/REQUEST_FLOWS.md`](docs/REQUEST_FLOWS.md) | What happens at runtime, step by step |
 | [`docs/DECISIONS.md`](docs/DECISIONS.md) | Choices and trade-offs |
+| [`docs/QUERY_OPTIMIZATION.md`](docs/QUERY_OPTIMIZATION.md) | How search was measured and indexed, with the evidence |
 | [`docs/LEARNING_LOG.md`](docs/LEARNING_LOG.md) | Concepts and exercises for each phase |

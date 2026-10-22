@@ -17,8 +17,8 @@ Runtime role: None. Documentation only.
 
 | Item | Value |
 |---|---|
-| Current phase | **07 — complete** |
-| Next phase | 08 — measured query optimization: benchmark data, `EXPLAIN ANALYZE` before and after, a `V2` migration |
+| Current phase | **08 — complete** |
+| Next phase | 09 — Redis detail caching: cache-aside for GET by id, versioned keys, JSON, TTL, an on/off switch, metrics |
 | Branch | `main`, tracking `origin/main` |
 | Repository | https://github.com/RishitheB0T/product-catalog-service (public) |
 | Last updated | 2026-10-22 |
@@ -34,7 +34,8 @@ Runtime role: None. Documentation only.
 | Phase 04 | `191b5b8` | `feat(database): add product schema and persistence` | Pushed and verified |
 | Phase 05 | `05e70c3` | `feat(api): implement product CRUD operations` | Pushed and verified |
 | Phase 06 | `c0566a4` | `feat(search): add validated product search and pagination` | Pushed and verified |
-| Phase 07 | Recorded at the start of Phase 08 | `test(backend): verify catalog API and database behavior` | Pushed and verified when committed |
+| Phase 07 | `fab9876` | `test(backend): verify catalog API and database behavior` | Pushed and verified |
+| Phase 08 | Recorded at the start of Phase 09 | `perf(database): optimize measured catalog search queries` | Pushed and verified when committed |
 
 <!-- BUILD FLOW 01.10.02 — Checks run in Phase 01 -->
 ## Checks run in Phase 01
@@ -150,6 +151,25 @@ All ran on 2026-10-22. Full details are in `BUILD_GUIDE.md`, Phase 07.
 - Every 405 is logged by Spring as a warning ("Request method … is not supported"). Harmless now; worth filtering
   when real traffic arrives (Phase 15).
 
+<!-- BUILD FLOW 01.10.12 — Checks run in Phase 08 -->
+## Checks run in Phase 08
+
+All ran on 2026-10-22. Full details are in `BUILD_GUIDE.md`, Phase 08, and the evidence in `docs/QUERY_OPTIMIZATION.md`.
+- `.\mvnw.cmd clean verify`: 91 tests, 0 failures, both before V2 existed and with V2 applied.
+- Benchmark database `catalog_bench`: 100,000 generated products (fingerprint pinned by a test), loaded in 3.8–5.6 s.
+- The SQL of 8 typical requests captured from MySQL's query log: 12 distinct statements.
+- `EXPLAIN ANALYZE` before and after V2: page queries 73–483× faster, the category count 5.8×, other counts and the
+  deep page unchanged, the no-match name search 44.5 → 193 ms; every result identical (SHA-256 fingerprints).
+- A full reproduction from a fresh database (`--spring.flyway.target=1`, then V2) gave identical fingerprints.
+
+**Carry-forward items**
+- Known slow cases, accepted for now (D-041): counts, the deepest pages, and name searches that match nothing.
+  Phase 11 measures them end to end before anything is changed.
+- The test run now holds 11 connection pools (up to 110 connections against MySQL's default 151). Phases 09–10 add
+  Redis test configurations: give tests smaller pools or reuse configurations first (D-036).
+- `catalog_bench` stays in the MySQL volume (100,000 products, schema V2) for the Phase 11 benchmarks;
+  `.\scripts\bench-db.ps1 drop -Force` removes it.
+
 <!-- BUILD FLOW 01.10.03 — Environment -->
 ## Environment (inspected 2026-10-20)
 
@@ -176,20 +196,19 @@ All ran on 2026-10-22. Full details are in `BUILD_GUIDE.md`, Phase 07.
 | GitHub repository and sign-in | — | Done on 2026-10-20: public repository created with the GitHub CLI; pushes verified |
 | `workflow` token scope for pushing CI files | Phase 14 | Pending. The current tokens are not known to include `workflow`, which GitHub requires for pushing files under `.github/workflows/`. Plan: `gh auth refresh -s workflow` when needed |
 | AWS account access and approval of instance, region, and cost | Phase 15 | Pending |
-| Anything blocking Phase 08 | — | None (Docker Desktop must be running; about 100,000 benchmark rows need some disk space in the MySQL volume) |
+| Anything blocking Phase 09 | — | None (Docker Desktop must be running; Redis already runs in the dev Compose file since Phase 03) |
 
 <!-- BUILD FLOW 01.10.05 — Next action -->
 ## Next action
 
-Next: Phase 08 (plan §8 and §14).
-1. Record Phase 07's commit hash in the commits table above.
-2. Benchmark data: deterministic (fixed random seed), configurable (about 100,000 products), and opt-in (never loaded
-   by default; the 24-product demo catalog stays as it is). Decide where it lives so that the demo data stays small.
-3. Capture the actual SQL of representative searches (for example category with a price sort, a price range with
-   in-stock, a name contains-search, a deep page) and save `EXPLAIN ANALYZE` for them **before** any change.
-4. Choose indexes or rewrites from those plans, add them in a new `V2__…` migration (V1 is never edited), save the
-   plans **after**, and prove with a result-equivalence check that every query returns exactly the same rows.
-5. Write `docs/QUERY_OPTIMIZATION.md`: composite-index column order, the leftmost-prefix rule, filtering versus
-   sorting, the write and storage cost of each index, why `LIKE '%term%'` cannot seek, and deep-offset cost.
-6. Checks: saved plans committed, all tests green, the equivalence check passing.
-7. Commit `perf(database): optimize measured catalog search queries`, push, and verify on GitHub.
+Next: Phase 09 (plan §9 and §14).
+1. Record Phase 08's commit hash in the commits table above.
+2. Add Spring Data Redis. Cache-aside for the product-detail DTO only (`GET /api/v1/products/{id}`): check Redis, on a
+   miss read MySQL and store the JSON with a TTL. Search stays on MySQL.
+3. Key `catalog:v1:product:{id}`, explicit JSON compatible with Spring Boot 4 and Jackson 3, a configurable 60-second
+   TTL, no caching of missing products, a switch that turns the cache off, and hit, miss, and error metrics.
+   Planned: explicit service-level code rather than annotations, so behavior and failures stay visible.
+4. Tests against real Redis (Testcontainers): a miss stores the value, a hit skips MySQL, the JSON round-trips, the TTL
+   expires. Inspect keys and TTLs with `redis-cli`.
+5. Write `docs/CACHING.md` (Phase 10 completes it: after-commit eviction, Redis outages, the stale-read race).
+6. Commit `feat(cache): cache product details in Redis`, push, and verify on GitHub.

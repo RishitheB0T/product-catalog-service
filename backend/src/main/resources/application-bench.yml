@@ -1,0 +1,36 @@
+# BUILD FLOW 08.01 — backend/src/main/resources/application-bench.yml
+# First introduced: Phase 08
+# Purpose: The "bench" profile: the application against its own local database, catalog_bench, holding about 100,000
+#          generated products, so search can be measured at a realistic size while the small demo catalog in the
+#          "catalog" database stays as it is.
+# Depends on: application.yml (02.06), infra/.env (database user and password), scripts/bench-db.ps1 (08.02), which
+#             creates the database.
+# Used by: Query measurements (Phase 08, docs/QUERY_OPTIMIZATION.md) and the benchmarks (Phase 11). Never on EC2.
+# Runtime role: Development machine only. Started with --spring.profiles.active=bench, instead of dev.
+
+# BUILD FLOW 08.01.01 — Address and port
+server:
+  # Loopback only, and its own port from the project's block (README "Ports"), so it can run next to the dev server.
+  address: 127.0.0.1
+  port: 24083
+
+# BUILD FLOW 08.01.02 — The benchmark database
+spring:
+  config:
+    # The same private infra/.env as the dev profile: the same MySQL server and user, a different database.
+    import: optional:file:../infra/.env[.properties]
+  datasource:
+    # rewriteBatchedStatements=true lets the MySQL driver send a batch of 1,000 INSERTs as one multi-row INSERT, so
+    # loading 100,000 products takes seconds instead of minutes. It only affects batches, so searches are unchanged.
+    url: jdbc:mysql://127.0.0.1:${MYSQL_HOST_PORT:24306}/catalog_bench?connectionTimeZone=UTC&rewriteBatchedStatements=true
+    username: ${MYSQL_USER:catalog}
+    password: ${MYSQL_PASSWORD:}
+
+# BUILD FLOW 08.01.03 — What the profile does
+catalog:
+  # Measurements only read. Generated products are inserted directly by BenchmarkDataSeeder (08.05), not by the API.
+  writes-enabled: false
+  bench:
+    # How many products to generate into an empty table, and the seed that makes them the same on every machine.
+    products: 100000
+    seed: 20261022
