@@ -1,0 +1,82 @@
+# BUILD FLOW 07.03 — backend/api-examples.http
+# First introduced: Phase 07
+# Purpose: Ready-to-send example requests for the product API, written for the REST Client extension for VS Code (other
+#          .http clients understand the requests, but may not support the {{createProduct.response...}} references).
+# Depends on: The backend running with the dev profile on 127.0.0.1:24081 (README "Quick start").
+# Used by: Developers trying the API by hand. Runtime role: none; a request is sent only when you choose to send it.
+#
+# Requests are separated by lines starting with ###. Send them from top to bottom: the requests after "Create" use the
+# id and version that "Create" returned. Creating twice without deleting gives 409 (the SKU is taken); delete first or
+# change the SKU. Writes need the dev profile; a production deployment answers them with 403 writes-disabled.
+
+@baseUrl = http://localhost:24081/api/v1/products
+
+# BUILD FLOW 07.03.01 — Search
+
+### Search: in-stock bags up to ₹3,000, cheapest first, 12 per page
+GET {{baseUrl}}?category=BAGS&maxPrice=3000&inStock=true&sort=price_asc&size=12
+
+### Search: names containing "linen" (case and accents are ignored), A to Z
+GET {{baseUrl}}?q=linen&sort=name_asc
+
+### Search: the second page of 10, newest first (pages are zero-based)
+GET {{baseUrl}}?page=1&size=10
+
+### Search with invalid parameters: 400 validation-failed listing "maxPrice" and "size"
+GET {{baseUrl}}?size=500&minPrice=5000&maxPrice=1000
+
+### Create a product: 201 Created with a Location header
+# BUILD FLOW 07.03.02 — One product from creation to deletion
+# (Comments go before a request line: after the blank line that ends the headers, every line is request body.)
+# @name createProduct
+POST {{baseUrl}}
+Content-Type: application/json
+
+{
+  "sku": "FRM-HOM-201",
+  "name": "Hand-thrown Planter",
+  "description": "Stoneware planter with a drainage hole and a matching saucer.",
+  "category": "HOME",
+  "price": 1890,
+  "stockQuantity": 12,
+  "imageUrl": null
+}
+
+### Read it back
+GET {{baseUrl}}/{{createProduct.response.body.$.id}}
+
+### Update it: the complete product plus the version you read. 200, and the version goes up by one
+PUT {{baseUrl}}/{{createProduct.response.body.$.id}}
+Content-Type: application/json
+
+{
+  "sku": "FRM-HOM-201",
+  "name": "Hand-thrown Planter, Large",
+  "description": "Stoneware planter with a drainage hole and a matching saucer.",
+  "category": "HOME",
+  "price": 2190,
+  "stockQuantity": 9,
+  "imageUrl": null,
+  "version": {{createProduct.response.body.$.version}}
+}
+
+### The same update again: its version is now outdated, so 409 version-conflict
+PUT {{baseUrl}}/{{createProduct.response.body.$.id}}
+Content-Type: application/json
+
+{
+  "sku": "FRM-HOM-201",
+  "name": "Hand-thrown Planter, Large",
+  "description": "Stoneware planter with a drainage hole and a matching saucer.",
+  "category": "HOME",
+  "price": 2190,
+  "stockQuantity": 9,
+  "imageUrl": null,
+  "version": {{createProduct.response.body.$.version}}
+}
+
+### Delete it: 204 No Content
+DELETE {{baseUrl}}/{{createProduct.response.body.$.id}}
+
+### Read it again: 404 product-not-found
+GET {{baseUrl}}/{{createProduct.response.body.$.id}}

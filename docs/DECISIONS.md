@@ -312,9 +312,12 @@ history, with a pointer to its replacement).
 - **Why:** five optional filters make 32 combinations. Predicates composed at runtime cover all of them, and every
   value travels as a bound parameter, so no SQL is ever assembled from request text.
 - **Alternatives:** derived query methods (one per combination); one `@Query` with `(:q IS NULL OR …)` for every
-  filter (a single query, but the optional conditions make it harder for MySQL to use indexes well, which matters in
-  Phase 08); JPQL built by string concatenation (easy to get wrong, open to injection); Querydsl (type-safe, but an
-  extra dependency with code generation); Query by Example (cannot express ranges).
+  filter (one statement for all 32 combinations, so every execution carries conditions for filters that were not sent;
+  whether the optimizer removes them depends on how the driver sends the values, and on databases that reuse cached
+  plans such "catch-all" queries are a known performance trap; the tri-state `inStock` and the escaped LIKE pattern
+  also fit badly); JPQL built by string concatenation (easy to get wrong, open to injection); Querydsl (type-safe, but
+  an extra dependency with code generation); Query by Example (cannot express ranges). *Wording corrected in Phase 07:
+  it first claimed the catch-all query makes index use harder for MySQL, which overstates it.*
 - **Trade-off:** attribute names are strings (`"price"`), checked only when a query runs. `ProductSearchTest` runs every
   predicate against MySQL. The JPA static metamodel (`Product_.price`) would check them when compiling, at the cost of
   an annotation processor in the build.
@@ -365,6 +368,28 @@ history, with a pointer to its replacement).
   happens. A record of our own is a contract that changes only when we change it.
 - **Alternative:** Spring Data's `PagedModel` (`@EnableSpringDataWebSupport(pageSerializationMode = VIA_DTO)`). It is
   stable too, but it nests the numbers in a `page` object, which differs from the required shape.
+
+## D-036 · Full-stack API tests over real HTTP with `RestTestClient` — Accepted (Phase 07)
+
+- **Decision:** `ProductApiIntegrationTest` and `ProductSearchApiIntegrationTest` start the application on a random
+  port (`@SpringBootTest(webEnvironment = RANDOM_PORT)`) and call it through the `RestTestClient` that
+  `@AutoConfigureRestTestClient` points at that port. The writable test classes share one configuration, so Spring
+  starts that application once. Their rows are committed, so every test uses its own SKUs and names.
+- **Why real HTTP:** only a real server shows what lies outside Spring MVC's handler methods: the Location header a
+  client follows, 404 for unknown paths, 405 with `Allow`, 415, percent-decoding of query strings, and requests that
+  are truly simultaneous on separate server threads (the two race tests). MockMvc (05.13) stays for fast checks of the
+  web layer in isolation.
+- **Why `RestTestClient`:** it belongs to Spring Framework 7's `spring-test`, and its Spring Boot integration comes
+  with the Web MVC test starter, so the build gains no dependency. It checks status, headers, and JSON paths fluently.
+  D-014 expected this when it chose the JDK `HttpClient` for the simpler health tests. One trap, seen in the
+  auto-configuration: if a `MockMvc` bean exists, the client calls MockMvc instead of the server, so a test asserts
+  that requests reach the random port.
+- **Alternatives:** `TestRestTemplate` (in the same Boot module, built on the older `RestTemplate`, with every check
+  written by hand), REST Assured (an extra dependency), the JDK `HttpClient` (no JSON assertions), and a separate
+  Maven Failsafe run for integration tests (it would allow a Docker-free `mvn test`, but nearly every test class
+  already needs MySQL).
+- **Trade-off:** each distinct test configuration starts another application with its own connection pool against the
+  one test MySQL. The run now holds 10 pools of up to 10 connections each; MySQL allows 151 connections by default.
 
 <!-- BUILD FLOW 01.08.03 — Open questions -->
 ## Open questions (each is decided in its phase)

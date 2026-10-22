@@ -584,3 +584,89 @@ GET /api/v1/products?q=linen&sort=price_asc
    ─► ProductMapper + PageResponse.from ─► {content, page, size, totalElements, totalPages}
    invalid parameters ─► ApiExceptionHandler ─► 400 validation-failed (no SQL)
 ```
+
+<!-- BUILD FLOW 01.05.09 — Phase 07 -->
+## Phase 07 — Full-stack tests over real HTTP, and example requests
+
+**What we had before.** Every layer was tested on its own: the web layer with a test double (MockMvc), the service
+and search on MySQL without HTTP, the repository with a JPA slice. Only the health endpoint was called over a real
+network connection.
+
+**What we add.** Two test classes that start the whole application on a random port and call it over real HTTP, as
+a client would. They cover a product's lifecycle, the exact JSON shape, every error type, a rollback seen from
+outside, Unicode, two races of ten simultaneous requests, search from real query strings, and the read-only `prod`
+profile. Plus an `.http` file of example requests.
+
+**Why.** The seams between layers are where the separate tests cannot look: headers, unknown paths, percent-decoding,
+JSON produced from real database rows, and requests that really run at the same time on different server threads.
+
+**Files in order**
+
+| BUILD FLOW | File | Role |
+|---|---|---|
+| 07.01 | `backend/src/test/java/com/example/catalog/product/ProductApiIntegrationTest.java` | Writes, errors, rollback, Unicode, races, read-only `prod` |
+| 07.02 | `backend/src/test/java/com/example/catalog/product/ProductSearchApiIntegrationTest.java` | Search over HTTP |
+| 07.03 | `backend/api-examples.http` | Example requests for VS Code's REST Client |
+
+Modified: documentation only (D-031's wording corrected; D-036 added; `REQUEST_FLOWS.md` 01.07.07 maps each flow to its
+tests). No production code changed: the full-stack tests found no defects.
+
+**Relevant syntax**
+- *Spring Boot tests*: `@SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT, properties = …)`,
+  `@AutoConfigureRestTestClient`, `@LocalServerPort`.
+- *RestTestClient*: `client.post().uri(…).contentType(…).body(record).exchange()`, then `expectStatus().isCreated()`,
+  `expectHeader().contentType(…)`, `expectBody().jsonPath("$.type").isEqualTo(…)`,
+  `expectBody(ProductResponse.class).returnResult().getResponseBody()`, `uri("…?q={q}", value)` (percent-encodes the
+  value), `client.method(HttpMethod.PATCH)`.
+- *Generic bodies*: `new ParameterizedTypeReference<PageResponse<ProductResponse>>() {}`.
+- *Concurrency*: `ExecutorService` in try-with-resources (Java 21), two `CountDownLatch`es to release ten requests
+  together, `Future.get(30, SECONDS)`.
+- *Test data*: committed rows, so unique SKUs (`API-…`, `SRCHAPI-…`) and per-test name prefixes (`Zq4 Filter`, …).
+- *`.http` files*: `@baseUrl = …`, `###` between requests, `# @name createProduct`,
+  `{{createProduct.response.body.$.id}}`.
+
+**Commands we ran** (PowerShell)
+
+| Command | Purpose |
+|---|---|
+| `javap` on `RestTestClient`, its assertion classes, and Boot's `RestTestClientTestAutoConfiguration` | Confirm the API and how the client finds the random port (and the MockMvc trap) |
+| `.\mvnw.cmd dependency:tree -Dincludes=…resttestclient` | Confirm which starter provides the Boot integration |
+| `.\mvnw.cmd -B -ntp clean verify` | Build and run all 85 tests |
+| `.\scripts\dev-services.ps1 up` and `java -jar … --spring.profiles.active=dev` | A real dev server for the manual checks |
+| A small runner that sends each request of `api-examples.http` with `curl.exe` | Check every example request against the dev server |
+| `curl.exe -Z --parallel-immediate --parallel-max 10` with ten PUTs of version 0, three rounds | Watch a race by hand, and see which version check stops the losers |
+
+**Expected behavior.** Every test passes against the real server; the race tests end with exactly one winner however
+the requests interleave; the example requests produce the statuses their titles promise.
+
+**Actual checks** (2026-10-22)
+
+| Check | Result |
+|---|---|
+| `clean verify` | 85 tests, 0 failures, on the first run: 22 controller, 15 API, 13 search, 13 repository, 8 service, 6 search API, 6 health, 2 demo data. `ProductSearchApiIntegrationTest` reused the application of `ProductApiIntegrationTest.WithWritesEnabled` (1.4 seconds for the class) |
+| Applications and pools | 5 real servers and 10 connection pools for the whole run (8 before this phase) |
+| Race tests | Ten simultaneous updates of version 0: one 200 and nine 409 `version-conflict`. Ten simultaneous creates with one SKU: one 201, nine 409 `duplicate-sku`, and one row in the table |
+| `api-examples.http` | All 10 requests answered as their titles say: three searches (200), invalid parameters (400 naming `maxPrice` and `size`), create (201, id 30), read (200), update (200, version 1), the same update (409), delete (204), read (404) |
+| Manual race, three rounds | Each round: one 200 (version 1) and nine 409s, every one of them from the second check (`UPDATE … WHERE version = ?` matched no row) |
+
+Mistakes and findings on the way:
+- The manual race showed something the automated test cannot: all ten requests read version 0 before the winner
+  committed, so the service's own version comparison let all ten through. Only the database stopped the nine losers:
+  their UPDATEs waited for the winner's row lock and then found no row with version 0. Without `@Version`, all ten
+  would have answered 200, each overwriting the one before.
+- My first `.http` draft put a section comment after a GET request. In an `.http` file every line after the first
+  blank line of a request is body, so that comment would have been sent as the GET's body. It now sits before a
+  request line, and the runner checks that no request has a body that is not JSON.
+- D-031 claimed that a single `(:q IS NULL OR …)` query makes index use harder for MySQL. That overstated it: MySQL can
+  drop such conditions when the driver inlines the values. The wording now describes the real risks.
+- Each test configuration keeps its own connection pool against the one test MySQL: 10 pools now, against MySQL's
+  default limit of 151 connections. Recorded as a limit to watch (D-036).
+
+**How the pieces connect**
+
+```text
+Test thread(s) ─► RestTestClient ─► real TCP connection to localhost:<random port>
+   ─► Tomcat ─► DispatcherServlet ─► ProductController ─► ProductService (real transaction) ─► MySQL container
+   ◄─ status, headers, JSON (or Problem Details) ◄─ checked with expectStatus / expectHeader / jsonPath
+Races: 10 threads ─► latch released ─► 10 requests at once ─► one commits; the database stops the other nine
+```

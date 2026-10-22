@@ -14,9 +14,10 @@ A product catalog built from an empty folder in documented phases, with every fi
 **Spring Boot** REST API over **MySQL**, **Redis** caching for product details, and a **React** storefront that
 uses the real API.
 
-> **Status: Phase 06 of 16 complete.** The product API searches the catalog (filters, sorting, pagination) and reads,
+> **Status: Phase 07 of 16 complete.** The product API searches the catalog (filters, sorting, pagination) and reads,
 > creates, updates, and deletes single products, with validation, optimistic locking, and one error format; production
-> settings are read-only. This README always describes what actually works; anything not built yet is labeled *planned*.
+> settings are read-only. 85 tests cover it, including full-stack tests over real HTTP. This README always describes
+> what actually works; anything not built yet is labeled *planned*.
 
 <!-- BUILD FLOW 01.04.01 — What works today -->
 ## What works today
@@ -29,6 +30,7 @@ uses the real API.
 | Product schema (Flyway), JPA entity and repository, dev demo catalog, tests on real MySQL | Done (Phase 04) |
 | Product API: get, create, update, delete; validation; RFC 9457 errors; read-only production mode | Done (Phase 05) |
 | Search with filters, sorting, and pagination; validated parameters | Done (Phase 06) |
+| Full-stack API tests over real HTTP, including simultaneous requests; example requests | Done (Phase 07) |
 | Measured query optimization | Planned (Phase 08) |
 | Redis product-detail cache | Planned (Phases 09–10) |
 | Benchmarks and performance report | Planned (Phase 11) |
@@ -177,7 +179,8 @@ interface, which suits a container but not a shared development machine.
 <!-- BUILD FLOW 01.04.09 — API (added in Phase 05) -->
 ## API
 
-Base path `/api/v1/products`, JSON in and out.
+Base path `/api/v1/products`, JSON in and out. Ready-to-send examples for VS Code's REST Client extension are in
+[`backend/api-examples.http`](backend/api-examples.http): searches, then one product from creation to deletion.
 
 | Method and path | Success | Typical errors |
 |---|---|---|
@@ -272,7 +275,14 @@ cd backend
 .\mvnw.cmd verify
 ```
 
-64 tests in six classes:
+85 tests in eight classes. The first two start the whole application on a random port and call it over real HTTP,
+exactly as a client would:
+- `ProductApiIntegrationTest` (15): a product from creation to deletion, the exact JSON shape, fields a client may not
+  set, every error type (400, 404, 405, 409, 415), a rollback seen through the API, Unicode text, ten simultaneous
+  updates of the same version (exactly one 200, nine 409s), ten simultaneous creates with one SKU (one 201, nine
+  409s), and the read-only `prod` profile.
+- `ProductSearchApiIntegrationTest` (6): filters from a real query string, the page envelope, ties across pages,
+  percent-encoded search text, and the binding behavior documented above.
 - `ProductControllerTest` (22), a web-layer test with the service replaced by a Mockito test double: status codes,
   JSON shapes, validation messages, every Problem Details type, and the search parameters (defaults, binding, and
   every kind of invalid value).

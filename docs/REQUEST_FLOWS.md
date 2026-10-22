@@ -127,3 +127,15 @@ A stale read is still possible. Request A misses the cache and reads version 7 f
 product to version 8, commits, and evicts the key, which is not in Redis yet, so nothing is removed. Request A then
 stores its old version-7 JSON in Redis. Readers get the stale copy until the TTL expires. The TTL limits how long
 this can last. Details and possible mitigations will be documented in `docs/CACHING.md` (Phases 09–10).
+
+<!-- BUILD FLOW 01.07.07 — Tests that walk through each flow (added in Phase 07) -->
+## Tests that walk through each flow
+
+| Flow | Tests, and the steps they cover |
+|---|---|
+| 0 — Health | `HealthEndpointTest`: every step over real HTTP, with no profile, `dev`, and `prod` |
+| 1 — Search | `ProductControllerTest` (`SEARCH-03`, service replaced by a test double); `ProductSearchTest` (`SEARCH-04` to `SEARCH-06` on MySQL); `ProductSearchApiIntegrationTest` (`SEARCH-03` to `SEARCH-06` from a real query string to JSON) |
+| 2 — Detail | `ProductControllerTest` (`READ-02`, the JSON of `READ-08`); `ProductServiceTest` (`READ-03` to `READ-06`); `ProductApiIntegrationTest` (every step over HTTP, including 404 after a delete) |
+| 4 — Write | `ProductServiceTest` (`WRITE-04` to `WRITE-06`); `ProductApiIntegrationTest` (`WRITE-01` to `WRITE-08` over HTTP: the lifecycle, 403 under `prod`, 400 before 403, and ten simultaneous updates that end as one 200 and nine 409s) |
+| 5 — Rollback | `ProductServiceTest.failedUpdateIsRolledBackCompletely`; `ProductApiIntegrationTest.aFailedUpdateChangesNothing` (the same rollback, seen over HTTP) |
+| 3 and 6 — Cache | Arrive with the cache in Phases 09–10 |

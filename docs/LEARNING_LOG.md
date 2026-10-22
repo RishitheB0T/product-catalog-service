@@ -261,3 +261,38 @@ Concepts in the order we met them, each with small practice exercises.
 4. Why does `ValidPriceRange` use `compareTo` and not `equals`? Try `new BigDecimal("1000").equals(new BigDecimal("1000.00"))`.
 5. With 24 products and `size=10`, how many SQL statements run for page 0, page 2, and page 3? Turn on SQL logging and
    check your answer.
+
+<!-- BUILD FLOW 01.09.08 — Phase 07 -->
+## Phase 07 — Full-stack tests
+
+**Concepts**
+- **The test pyramid.** Many fast, narrow tests (web slice with a test double, repository slice), fewer tests through
+  the service on a real database, and a few end-to-end tests over real HTTP. Each level catches what the others
+  cannot see; the top level is the slowest and is kept for the seams.
+- **MockMvc vs. a real server.** MockMvc calls Spring MVC inside the test (no port, no socket). `RANDOM_PORT` starts
+  Tomcat on a free port, so headers, unknown paths, percent-decoding, and truly simultaneous requests are real.
+- **Committed test data.** Without a test transaction, rows stay in the shared database, so tests must never depend
+  on the table being empty: unique SKUs and per-test name prefixes keep them independent.
+- **Spring's test-context cache.** Test classes with identical configuration share one running application; each
+  different configuration starts another one, with its own connection pool.
+- **Races and invariants.** A race test cannot choose who wins, so it asserts what must hold for every interleaving:
+  exactly one success, all others conflicts, one row.
+- **Lost updates and optimistic locking.** When requests read the same version at the same moment, only the database
+  can tell them apart: `UPDATE … WHERE version = ?` lets the first commit win and makes the others match no row.
+- **Unique keys under concurrency.** Simultaneous inserts of the same key wait for the first one's lock; when it
+  commits, the others fail with a duplicate-key error (1062).
+- **Mass assignment, end to end.** Fields that the request record does not declare (`id`, `version`, timestamps) are
+  ignored, so a client cannot set them.
+- **`.http` files.** Plain-text HTTP requests that an editor can send; `###` separates requests, and named requests
+  let later requests reuse earlier answers.
+
+**Exercises**
+1. In `ProductApiIntegrationTest`, why does `requestsTravelOverARealNetworkConnection` exist? What would silently
+   change if someone added `@AutoConfigureMockMvc` to the test class?
+2. The race test sends ten updates with version 0. Explain why the answer is one 200 and nine 409s whichever request
+   arrives first, and which of the two version checks stopped the losers in the manual race.
+3. Delete `@Version` from `Product` on a scratch branch (don't commit), run the update race, and explain the result.
+4. Why do `ProductApiIntegrationTest.WithWritesEnabled` and `ProductSearchApiIntegrationTest` start only one
+   application between them? Add one property to one of them and count the applications in the test log.
+5. Open `backend/api-examples.http` in VS Code with the REST Client extension and send the requests in order. Then
+   send "Create" twice in a row. What do you get the second time, and why?

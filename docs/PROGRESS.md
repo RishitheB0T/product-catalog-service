@@ -17,11 +17,11 @@ Runtime role: None. Documentation only.
 
 | Item | Value |
 |---|---|
-| Current phase | **06 — complete** |
-| Next phase | 07 — broader backend tests: full-stack HTTP tests on a random port, example requests |
+| Current phase | **07 — complete** |
+| Next phase | 08 — measured query optimization: benchmark data, `EXPLAIN ANALYZE` before and after, a `V2` migration |
 | Branch | `main`, tracking `origin/main` |
 | Repository | https://github.com/RishitheB0T/product-catalog-service (public) |
-| Last updated | 2026-10-21 |
+| Last updated | 2026-10-22 |
 
 **Commits so far** (each commit records the hash of the one before it, because a commit cannot contain its own hash)
 
@@ -33,7 +33,8 @@ Runtime role: None. Documentation only.
 | Phase 03 | `71f067c` | `chore(infra): add local MySQL and Redis services` | Pushed and verified |
 | Phase 04 | `191b5b8` | `feat(database): add product schema and persistence` | Pushed and verified |
 | Phase 05 | `05e70c3` | `feat(api): implement product CRUD operations` | Pushed and verified |
-| Phase 06 | Recorded at the start of Phase 07 | `feat(search): add validated product search and pagination` | Pushed and verified when committed |
+| Phase 06 | `c0566a4` | `feat(search): add validated product search and pagination` | Pushed and verified |
+| Phase 07 | Recorded at the start of Phase 08 | `test(backend): verify catalog API and database behavior` | Pushed and verified when committed |
 
 <!-- BUILD FLOW 01.10.02 — Checks run in Phase 01 -->
 ## Checks run in Phase 01
@@ -128,7 +129,26 @@ All ran on 2026-10-21. Full details are in `BUILD_GUIDE.md`, Phase 06.
 **Carry-forward items**
 - No search indexes yet, on purpose: Phase 08 measures this baseline with `EXPLAIN ANALYZE` first.
 - A repeated query parameter uses its first value, and conversion errors are reported before (instead of together
-  with) rule violations (D-034). Phase 07's HTTP tests can pin these down.
+  with) rule violations (D-034). Phase 07's HTTP tests can pin these down. (Done in Phase 07.)
+
+<!-- BUILD FLOW 01.10.11 — Checks run in Phase 07 -->
+## Checks run in Phase 07
+
+All ran on 2026-10-22. Full details are in `BUILD_GUIDE.md`, Phase 07.
+- `.\mvnw.cmd clean verify`: 85 tests, 0 failures (22 controller, 15 API, 13 search, 13 repository, 8 service,
+  6 search API, 6 health, 2 demo data). 5 real servers and 10 connection pools for the whole run.
+- Race tests: ten simultaneous updates of one version end as one 200 and nine 409s; ten simultaneous creates with one
+  SKU end as one 201, nine 409s, and one row.
+- Every request in `backend/api-examples.http`, sent with `curl.exe` against the dev server, answered as its title says.
+- A manual race with `curl.exe --parallel` (three rounds of ten PUTs): one winner each time; all losers were stopped
+  by Hibernate's `WHERE version = ?`, because all ten requests had read version 0 before the winner committed.
+
+**Carry-forward items**
+- Each distinct test configuration starts another application with its own connection pool: 10 pools of up to 10
+  connections against the one test MySQL (default limit 151). Reuse existing configurations where possible, or give
+  tests smaller pools, before adding many more (D-036).
+- Every 405 is logged by Spring as a warning ("Request method … is not supported"). Harmless now; worth filtering
+  when real traffic arrives (Phase 15).
 
 <!-- BUILD FLOW 01.10.03 — Environment -->
 ## Environment (inspected 2026-10-20)
@@ -156,16 +176,20 @@ All ran on 2026-10-21. Full details are in `BUILD_GUIDE.md`, Phase 06.
 | GitHub repository and sign-in | — | Done on 2026-10-20: public repository created with the GitHub CLI; pushes verified |
 | `workflow` token scope for pushing CI files | Phase 14 | Pending. The current tokens are not known to include `workflow`, which GitHub requires for pushing files under `.github/workflows/`. Plan: `gh auth refresh -s workflow` when needed |
 | AWS account access and approval of instance, region, and cost | Phase 15 | Pending |
-| Anything blocking Phase 07 | — | None (Docker Desktop must be running for the tests and the dev database) |
+| Anything blocking Phase 08 | — | None (Docker Desktop must be running; about 100,000 benchmark rows need some disk space in the MySQL volume) |
 
 <!-- BUILD FLOW 01.10.05 — Next action -->
 ## Next action
 
-Next: Phase 07.
-1. Record Phase 06's commit hash in the commits table above.
-2. Full-stack integration tests: the real application on a random port, real HTTP requests, real MySQL. Cover CRUD,
-   validation, 404s, 409s, combined filters, sort tie-breakers, pagination, transaction rollback, and read-only
-   rejection, end to end.
-3. Example requests: PowerShell and `curl.exe` commands plus an `.http` file for editors that can send it.
-4. `.\mvnw.cmd verify` with the test summary recorded.
-5. Commit `test(backend): verify catalog API and database behavior`, push, and verify on GitHub.
+Next: Phase 08 (plan §8 and §14).
+1. Record Phase 07's commit hash in the commits table above.
+2. Benchmark data: deterministic (fixed random seed), configurable (about 100,000 products), and opt-in (never loaded
+   by default; the 24-product demo catalog stays as it is). Decide where it lives so that the demo data stays small.
+3. Capture the actual SQL of representative searches (for example category with a price sort, a price range with
+   in-stock, a name contains-search, a deep page) and save `EXPLAIN ANALYZE` for them **before** any change.
+4. Choose indexes or rewrites from those plans, add them in a new `V2__…` migration (V1 is never edited), save the
+   plans **after**, and prove with a result-equivalence check that every query returns exactly the same rows.
+5. Write `docs/QUERY_OPTIMIZATION.md`: composite-index column order, the leftmost-prefix rule, filtering versus
+   sorting, the write and storage cost of each index, why `LIKE '%term%'` cannot seek, and deep-offset cost.
+6. Checks: saved plans committed, all tests green, the equivalence check passing.
+7. Commit `perf(database): optimize measured catalog search queries`, push, and verify on GitHub.
