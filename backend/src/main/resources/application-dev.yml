@@ -28,6 +28,13 @@ management:
       # Lists every health component (disk space now; the database from Phase 04). Useful when
       # something is DOWN locally. The base and prod settings keep these details hidden.
       show-details: always
+  # BUILD FLOW 02.07.07 — Metrics locally (added in Phase 09)
+  # Adds /actuator/metrics, so the cache counters can be read by hand, for example
+  # /actuator/metrics/catalog.product.cache?tag=result:hit. Development only: production exposes health alone.
+  endpoints:
+    web:
+      exposure:
+        include: health,metrics
 
 # BUILD FLOW 02.07.04 — Database connection for local development (added in Phase 04)
 spring:
@@ -44,6 +51,12 @@ spring:
     url: jdbc:mysql://127.0.0.1:${MYSQL_HOST_PORT:24306}/${MYSQL_DATABASE:catalog}?connectionTimeZone=UTC
     username: ${MYSQL_USER:catalog}
     password: ${MYSQL_PASSWORD:}
+  # BUILD FLOW 02.07.06 — Redis for local development (added in Phase 09)
+  # The Redis container from Phase 03, on loopback, without a password (it is reachable from this computer only).
+  data:
+    redis:
+      host: 127.0.0.1
+      port: ${REDIS_HOST_PORT:24379}
 
 # BUILD FLOW 02.07.05 — Local administration is allowed (added in Phase 05)
 catalog:

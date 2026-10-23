@@ -124,6 +124,15 @@
 			<scope>runtime</scope>
 		</dependency>
 
+		<!-- BUILD FLOW 02.01.11 — Redis (added in Phase 09)
+		     spring-boot-starter-data-redis: Spring Data Redis with the Lettuce client, and an auto-configured
+		     StringRedisTemplate for reading and writing text values. The product-detail cache stores JSON text,
+		     written with the application's own Jackson mapper. -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-data-redis</artifactId>
+		</dependency>
+
 		<!-- BUILD FLOW 02.01.06 — Test-only dependencies
 		     Scope "test" puts these on the test classpath only; they never ship inside the jar.
 		     Spring Boot 4 has one test starter per technology. Together they bring JUnit 6,
@@ -167,6 +176,14 @@
 		<dependency>
 			<groupId>org.testcontainers</groupId>
 			<artifactId>testcontainers-mysql</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<!-- BUILD FLOW 02.01.12 — Redis test support (added in Phase 09)
+		     The Redis test starter adds Spring Boot's test support for Spring Data Redis. Redis itself runs in a
+		     plain Testcontainers container (redis:8.10.2-alpine), wired up in TestcontainersConfiguration. -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-data-redis-test</artifactId>
 			<scope>test</scope>
 		</dependency>
 	</dependencies>

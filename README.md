@@ -14,10 +14,11 @@ A product catalog built from an empty folder in documented phases, with every fi
 **Spring Boot** REST API over **MySQL**, **Redis** caching for product details, and a **React** storefront that
 uses the real API.
 
-> **Status: Phase 08 of 16 complete.** The product API searches the catalog (filters, sorting, pagination) and reads,
+> **Status: Phase 09 of 16 complete.** The product API searches the catalog (filters, sorting, pagination) and reads,
 > creates, updates, and deletes single products, with validation, optimistic locking, and one error format; production
-> settings are read-only. Search queries were measured on 100,000 products and indexed from the measured plans.
-> 91 tests cover it, including full-stack tests over real HTTP. This README always describes what actually works;
+> settings are read-only. Search queries were measured on 100,000 products and indexed from the measured plans. A
+> Redis cache for product details is built and tested, but switched off until Phase 10 makes writes clear it.
+> 100 tests cover it, including full-stack tests over real HTTP. This README always describes what actually works;
 > anything not built yet is labeled *planned*.
 
 <!-- BUILD FLOW 01.04.01 — What works today -->
@@ -33,7 +34,8 @@ uses the real API.
 | Search with filters, sorting, and pagination; validated parameters | Done (Phase 06) |
 | Full-stack API tests over real HTTP, including simultaneous requests; example requests | Done (Phase 07) |
 | Measured query optimization: 100,000-product benchmark data, `EXPLAIN ANALYZE` before and after, search indexes (V2) | Done (Phase 08) |
-| Redis product-detail cache | Planned (Phases 09–10) |
+| Redis product-detail cache: cache-aside reads, versioned keys, JSON, 60-second TTL, metrics; off by default | Done (Phase 09) |
+| Cache eviction after committed writes, Redis outage handling; cache switched on | Planned (Phase 10) |
 | Benchmarks and performance report | Planned (Phase 11) |
 | React storefront and local admin | Planned (Phases 12–13) |
 | Production containers and CI | Planned (Phase 14) |
@@ -149,7 +151,9 @@ curl.exe http://localhost:24081/actuator/health
 
 You should see `"status":"UP"` together with component details, including `db` (MySQL), which only the dev profile
 shows. On the first start Flyway creates the product table, and the dev profile loads 24 demo products (log line
-`Loaded 24 demo products`). Stop the app with Ctrl+C. Redis is used from Phase 09.
+`Loaded 24 demo products`). Stop the app with Ctrl+C. The Redis cache for product details is off until Phase 10;
+to try it, build the jar and start it with the cache on (see [`docs/CACHING.md`](docs/CACHING.md)):
+`java -jar target\catalog-0.0.1-SNAPSHOT.jar --spring.profiles.active=dev --catalog.cache.enabled=true` (in `backend`).
 
 - Keep the quotes around `-Dspring-boot.run.profiles=dev`. Windows PowerShell splits an unquoted argument like
   this at its first dot, so Maven would receive the wrong setting.
@@ -269,15 +273,15 @@ itself, so hiding the admin buttons in the UI is not the only protection.
 
 ## Tests
 
-Docker Desktop must be running: the tests start their own MySQL 8.4.11 container through Testcontainers, separate
-from the development database.
+Docker Desktop must be running: the tests start their own MySQL 8.4.11 and Redis 8.10.2 containers through
+Testcontainers, separate from the development services.
 
 ```powershell
 cd backend
 .\mvnw.cmd verify
 ```
 
-91 tests in ten classes. The first two start the whole application on a random port and call it over real HTTP,
+100 tests in twelve classes. The first two start the whole application on a random port and call it over real HTTP,
 exactly as a client would:
 - `ProductApiIntegrationTest` (15): a product from creation to deletion, the exact JSON shape, fields a client may not
   set, every error type (400, 404, 405, 409, 415), a rollback seen through the API, Unicode text, ten simultaneous
@@ -299,6 +303,9 @@ exactly as a client would:
   SKUs and six kinds of invalid rows are rejected by the database itself, and optimistic locking refuses an update
   based on an outdated version.
 - `DemoDataLoaderTest` (2) checks that the demo catalog loads only with `dev`, only into an empty table, and only once.
+- `ProductDetailCacheTest` (7) runs against real Redis: a miss stores the JSON with its TTL, a hit answers without
+  MySQL, every field survives the round trip, missing products and a switched-off cache store nothing, an unreadable
+  value is counted and replaced, and keys expire. `TestcontainersConfigurationTest` (2) checks the shared test setup.
 - `BenchmarkProductGeneratorTest` (4) checks that the benchmark data is reproducible (a pinned fingerprint for all
   100,000 products), valid by the API's own rules, and shaped like a real catalog; `BenchmarkDataSeederTest` (2)
   checks that it loads only with the `bench` profile, only into an empty table, and only once.
@@ -338,4 +345,5 @@ instance, region, and cost.
 | [`docs/REQUEST_FLOWS.md`](docs/REQUEST_FLOWS.md) | What happens at runtime, step by step |
 | [`docs/DECISIONS.md`](docs/DECISIONS.md) | Choices and trade-offs |
 | [`docs/QUERY_OPTIMIZATION.md`](docs/QUERY_OPTIMIZATION.md) | How search was measured and indexed, with the evidence |
+| [`docs/CACHING.md`](docs/CACHING.md) | The Redis product-detail cache: keys, TTL, flows, failures, limits |
 | [`docs/LEARNING_LOG.md`](docs/LEARNING_LOG.md) | Concepts and exercises for each phase |

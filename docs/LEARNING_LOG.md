@@ -336,3 +336,35 @@ Concepts in the order we met them, each with small practice exercises.
 5. Run `.\scripts\measure-queries.ps1 -Label my-run -Baseline after-v2` (the bench database must be loaded). Are the
    fingerprints identical? Are the times? What does that tell you about comparing single timings? Delete
    `benchmarks/query-plans/my-run.txt` afterwards; it is not part of the recorded evidence.
+
+<!-- BUILD FLOW 01.09.10 — Phase 09 -->
+## Phase 09 — Redis cache for product details
+
+**Concepts**
+- **Cache-aside.** The application looks in the cache first and fills it itself after a database read; the database
+  stays the source of truth.
+- **What to cache.** Data read often, changed rarely, and addressable by one key (a product by id). Search results
+  depend on many rows and parameters, so invalidating them correctly is hard.
+- **TTL.** Time to live: Redis deletes a key by itself. It is the upper bound on how long an outdated copy can survive,
+  and the trade-off between hit rate and freshness.
+- **Key design.** A namespace (`catalog:`), a format version (`v1`), and the id, so keys never collide and a format
+  change never misreads old values.
+- **Serialization.** JSON written by the same mapper as the API: readable, language-neutral, and identical to the
+  response. Java serialization would be binary and fragile.
+- **Negative caching.** Storing "not found" saves database reads but can hide a product created a moment later; not
+  done here.
+- **Transaction scope.** A transaction should cover only database work. Calling Redis while holding a database
+  connection wastes a scarce resource.
+- **Graceful degradation.** A cache failure becomes a slower answer from the database, never an error, and is counted
+  so it is noticed. Only expected failure types are caught.
+- **Health of dependencies.** An optional dependency (a cache) must not make the service report itself DOWN.
+- **Metrics.** Counters with tags (`result=hit|miss|error`) give the hit rate and reveal failures.
+
+**Exercises**
+1. Start the dev backend with `--catalog.cache.enabled=true`, read product 7, change its price with `PUT`, and read it
+   again within 60 seconds. What do you see, and which Phase 10 change fixes it?
+2. Why is `@Transactional` no longer on `getProduct`? What would a cache hit cost if it were?
+3. Run `redis-cli TTL catalog:v1:product:7` a few times. What happens when it reaches 0, and what does the next read do?
+4. Put "not json" into a key with `redis-cli SET`, read the product through the API, and look at the key again. Which
+   counter changed?
+5. Why would including Redis in the health check be dangerous behind a load balancer?

@@ -781,3 +781,83 @@ measure-queries.ps1 ─► ANALYZE TABLE ─► per query: warm-up, EXPLAIN ANAL
    before-v2.txt ─► V2__add_search_indexes.sql ─► after-v2.txt (compared: identical) ─► index-alternatives.txt
    ─► docs/QUERY_OPTIMIZATION.md
 ```
+
+<!-- BUILD FLOW 01.05.11 — Phase 09 -->
+## Phase 09 — Redis cache for product details (read path)
+
+**What we had before.** Every `GET /api/v1/products/{id}` read MySQL. Redis ran in Docker Compose since Phase 03,
+unused.
+
+**What we add.** Cache-aside for product details: look in Redis, on a miss read MySQL and store the JSON for 60
+seconds, count hits, misses, and errors. Versioned keys (`catalog:v1:product:{id}`), the application's own JSON, a
+switch, Redis excluded from health, and tests against a real Redis container. The cache ships **switched off**:
+writes do not clear it until Phase 10 (D-044).
+
+**Why.** Product pages are read far more often than products change; a hit skips the database entirely. Building the
+read path first, with tests, keeps Phase 10 focused on the hard part: clearing the cache at exactly the right moment.
+
+**Files in order**
+
+| BUILD FLOW | File | Role |
+|---|---|---|
+| 09.01 | `backend/src/main/java/com/example/catalog/config/ProductCacheProperties.java` | The switch and the TTL |
+| 09.02 | `backend/src/main/java/com/example/catalog/product/ProductDetailCache.java` | Redis get/put, JSON, counters |
+| 09.03 | `backend/src/test/java/com/example/catalog/product/ProductDetailCacheTest.java` | Cache tests on real Redis |
+| 09.04 | `backend/src/test/java/com/example/catalog/TestcontainersConfigurationTest.java` | Checks the shared test setup |
+| 09.05 | `docs/CACHING.md` | The cache explained, with its limits |
+
+Modified: `pom.xml` (02.01.11–02.01.12: Spring Data Redis and its test starter); `application.yml` (02.06.06–02.06.07:
+cache settings, Redis out of health); `application-dev.yml` (02.07.06–02.07.07: Redis address, `/actuator/metrics`);
+`ProductService.java` (05.10.02: cache-aside, a `TransactionTemplate` around the MySQL read only);
+`TestcontainersConfiguration.java` (04.07.03–04.07.04: a Redis container, small idle pools).
+
+**Relevant syntax**
+- *Spring Data Redis*: `StringRedisTemplate.opsForValue().get(key)` and `.set(key, value, ttl)`, `getExpire`, `hasKey`.
+- *Jackson 3*: `JsonMapper.writeValueAsString(…)`, `readValue(json, ProductResponse.class)`, `JacksonException`.
+- *Micrometer*: `Counter.builder("catalog.product.cache").tag("result", "hit").register(meters)`.
+- *Transactions*: `new TransactionTemplate(transactionManager)`, `setReadOnly(true)`, `execute(status -> …)`.
+- *Configuration*: `Duration` properties (`60s`), `@DefaultValue`, `management.health.redis.enabled`.
+- *Tests*: `@ServiceConnection(name = "redis")` on a `GenericContainer`, `DynamicPropertyRegistrar`,
+  `@AutoConfigureMetrics`, Awaitility's `await().atMost(…).until(…)`.
+
+**Commands we ran** (PowerShell)
+
+| Command | Purpose |
+|---|---|
+| `.\mvnw.cmd dependency:build-classpath`, `javap` on the Redis connection factory and health configuration | Confirm Boot 4's Redis test support and the health property |
+| `.\mvnw.cmd -B -ntp clean verify` | Build and run all tests (twice; see the findings) |
+| `.\scripts\dev-services.ps1 up`, then `java -jar … --spring.profiles.active=dev --catalog.cache.enabled=true` | The dev stack with the cache on |
+| `curl.exe` reads, `redis-cli --scan`, `TTL`, `GET` inside the Redis container, `/actuator/metrics/catalog.product.cache` | Inspect the cache by hand |
+
+**Expected behavior.** A first read stores the product; a second read is a hit; nothing is stored for a missing
+product; health stays UP without mentioning Redis; all earlier tests stay green with the cache off.
+
+**Actual checks** (2026-10-23)
+
+| Check | Result |
+|---|---|
+| First `clean verify` | 72 errors: no test application could start (see the findings) |
+| Second `clean verify` | 100 tests, 0 failures (91 earlier, 7 cache, 2 setup); 13 connection pools, each keeping one idle connection |
+| Manual check | One key `catalog:v1:product:7` after the first read, TTL 59 s, value exactly the API's JSON; metrics hit 1, miss 1, error 0; the unknown id 404 with no key; health UP with components db, diskSpace, livenessState, ping, readinessState, ssl |
+| Dev database | Flyway applied V2 to `catalog` on this start (192 ms) |
+
+Mistakes and findings on the way:
+- **Docker Desktop was not running** at the start, and is installed per user rather than under Program Files; it was
+  started from its own install location before any test ran.
+- **Every test application failed to start** on the first run: "No ConnectionDetails found" for the Redis container.
+  Spring Boot recognizes typed containers, but for a plain `GenericContainer` the connection must be named:
+  `@ServiceConnection(name = "redis")`. One line fixed all 72 errors.
+- **The first request's time is not a cache result.** 0.71 s versus 0.02 s for the second read mostly measures a cold
+  JVM (class loading, compilation). Phase 11 compares cache on and off with warm-up runs.
+- **Redis outages are not handled yet.** Lettuce waits up to 60 seconds for a command by default; Phase 10 adds short
+  timeouts and tests the outage.
+
+**How the pieces connect**
+
+```text
+GET /api/v1/products/7 ─► ProductController ─► ProductService.getProduct
+   ├─ ProductDetailCache.get ─► Redis GET catalog:v1:product:7 ─► hit: return the JSON as ProductResponse
+   └─ miss: TransactionTemplate (read-only) ─► ProductRepository.findById ─► MySQL ─► ProductMapper
+            ─► ProductDetailCache.put ─► Redis SET … EX 60 ─► return
+   counters: catalog.product.cache{result=hit|miss|error}
+```

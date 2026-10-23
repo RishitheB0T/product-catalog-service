@@ -4,19 +4,24 @@
  * Purpose: The product rules: read, search, create, update, and delete, each inside one database transaction. It
  *          refuses writes in read-only deployments, checks versions, and translates database errors into domain errors.
  * Depends on: ProductRepository (04.04), ProductMapper (05.05), CatalogProperties (05.01), the exceptions 05.06–05.09;
- *             for search ProductSearchRequest (06.04), ProductSpecifications (06.06), and PageResponse (06.05).
+ *             for search ProductSearchRequest (06.04), ProductSpecifications (06.06), and PageResponse (06.05); since
+ *             Phase 09 ProductDetailCache (09.02) and the transaction manager, for reads of one product.
  * Called by: ProductController (05.11).
  * Runtime role: The business-logic step of every product request (runtime steps READ-03, SEARCH-04 to SEARCH-06, and
  *               WRITE-04 to WRITE-06).
  */
 package com.example.catalog.product;
 
+import java.util.Optional;
+
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import com.example.catalog.api.PageResponse;
 import com.example.catalog.config.CatalogProperties;
@@ -37,19 +42,38 @@ public class ProductService {
     private final ProductRepository repository;
     private final ProductMapper mapper;
     private final CatalogProperties properties;
+    private final ProductDetailCache cache;
+    private final TransactionTemplate readOnlyTransaction;
 
-    // Constructor injection, as in DemoDataLoader (04.06): Spring passes in the three beans this class needs.
-    public ProductService(ProductRepository repository, ProductMapper mapper, CatalogProperties properties) {
+    // Constructor injection, as in DemoDataLoader (04.06): Spring passes in the beans this class needs. The transaction
+    // manager is the same one @Transactional uses; a TransactionTemplate built from it runs code in a transaction
+    // explicitly, here marked read-only like @Transactional(readOnly = true).
+    public ProductService(ProductRepository repository, ProductMapper mapper, CatalogProperties properties,
+            ProductDetailCache cache, PlatformTransactionManager transactionManager) {
         this.repository = repository;
         this.mapper = mapper;
         this.properties = properties;
+        this.cache = cache;
+        this.readOnlyTransaction = new TransactionTemplate(transactionManager);
+        this.readOnlyTransaction.setReadOnly(true);
     }
 
-    // BUILD FLOW 05.10.02 — Reading one product (runtime step READ-03)
-    // The DTO is built inside the transaction, so everything it needs is loaded before the transaction ends.
-    @Transactional(readOnly = true)
+    // BUILD FLOW 05.10.02 — Reading one product, cache-aside (runtime steps READ-03 to READ-07; cache since Phase 09)
+    // 1. Ask the cache (READ-04). A hit is answered from Redis; MySQL is not touched.
+    // 2. On a miss, read MySQL in a read-only transaction (READ-05, READ-06). The DTO is built inside it, so everything
+    //    it needs is loaded before the transaction ends.
+    // 3. Store the DTO in the cache (READ-07), after the transaction has ended.
+    // The transaction deliberately covers only step 2: with @Transactional on this method, every request, even a cache
+    // hit, would borrow a database connection, and Redis calls would run while holding it. A missing product throws in
+    // step 2, so it is never cached. (Writes do not clear the cache until Phase 10; see application.yml, 02.06.06.)
     public ProductResponse getProduct(long id) {
-        return mapper.toResponse(findExisting(id));
+        Optional<ProductResponse> cached = cache.get(id);
+        if (cached.isPresent()) {
+            return cached.get();
+        }
+        ProductResponse fresh = readOnlyTransaction.execute(status -> mapper.toResponse(findExisting(id)));
+        cache.put(fresh);
+        return fresh;
     }
 
     // BUILD FLOW 05.10.07 — Searching (runtime steps SEARCH-04 to SEARCH-06; added in Phase 06)

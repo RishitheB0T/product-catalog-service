@@ -50,6 +50,14 @@ catalog:
   # Creating, updating, and deleting products. Off unless a profile turns it on, so a deployment that is missing its
   # settings stays read-only instead of becoming writable (a fail-safe default, decision D-026).
   writes-enabled: false
+  # BUILD FLOW 02.06.06 — Product-detail cache (added in Phase 09)
+  # Read through ProductCacheProperties (09.01). Off by default in Phase 09: creates, updates, and deletes do not clear
+  # cached products until Phase 10 adds after-commit eviction, so an enabled cache could serve an outdated product for
+  # up to one TTL. Tests and manual checks switch it on explicitly.
+  cache:
+    enabled: false
+    # How long a cached product stays in Redis: a longer TTL means more hits, a shorter one fresher data.
+    product-ttl: 60s
 
 # BUILD FLOW 02.06.02 — Actuator: expose only the health endpoint over HTTP
 # Actuator offers many endpoints (env, beans, configprops, heapdump, ...). Several reveal
@@ -67,3 +75,9 @@ management:
       # readiness probe groups that Spring Boot 4 enables automatically, but not which components
       # exist or why one failed. The dev profile shows the details; production keeps them hidden.
       show-details: never
+  # BUILD FLOW 02.06.07 — Redis is not part of health (added in Phase 09)
+  # The cache only speeds up reads: when Redis is down, product details come from MySQL (decision D-042). If Redis
+  # counted towards health, a cache outage would mark the whole service DOWN and take it out of service.
+  health:
+    redis:
+      enabled: false

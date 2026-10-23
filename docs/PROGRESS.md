@@ -17,8 +17,8 @@ Runtime role: None. Documentation only.
 
 | Item | Value |
 |---|---|
-| Current phase | **08 — complete** |
-| Next phase | 09 — Redis detail caching: cache-aside for GET by id, versioned keys, JSON, TTL, an on/off switch, metrics |
+| Current phase | **09 — complete** |
+| Next phase | 10 — committed writes and Redis failures: after-commit eviction, short timeouts, outage fallback; cache switched on |
 | Branch | `main`, tracking `origin/main` |
 | Repository | https://github.com/RishitheB0T/product-catalog-service (public) |
 | Last updated | 2026-10-22 |
@@ -35,7 +35,8 @@ Runtime role: None. Documentation only.
 | Phase 05 | `05e70c3` | `feat(api): implement product CRUD operations` | Pushed and verified |
 | Phase 06 | `c0566a4` | `feat(search): add validated product search and pagination` | Pushed and verified |
 | Phase 07 | `fab9876` | `test(backend): verify catalog API and database behavior` | Pushed and verified |
-| Phase 08 | Recorded at the start of Phase 09 | `perf(database): optimize measured catalog search queries` | Pushed and verified when committed |
+| Phase 08 | `837a972` | `perf(database): optimize measured catalog search queries` | Pushed and verified |
+| Phase 09 | Recorded at the start of Phase 10 | `feat(cache): cache product details in Redis` | Pushed and verified when committed |
 
 <!-- BUILD FLOW 01.10.02 — Checks run in Phase 01 -->
 ## Checks run in Phase 01
@@ -170,6 +171,20 @@ All ran on 2026-10-22. Full details are in `BUILD_GUIDE.md`, Phase 08, and the e
 - `catalog_bench` stays in the MySQL volume (100,000 products, schema V2) for the Phase 11 benchmarks;
   `.\scripts\bench-db.ps1 drop -Force` removes it.
 
+<!-- BUILD FLOW 01.10.13 — Checks run in Phase 09 -->
+## Checks run in Phase 09
+
+All ran on 2026-10-23. Full details are in `BUILD_GUIDE.md`, Phase 09, and `docs/CACHING.md`.
+- `.\mvnw.cmd clean verify`: 100 tests, 0 failures (the first run failed to start any test application until the
+  Redis test container's connection was named).
+- By hand with the cache on: one key with TTL 59 s holding the API's JSON; hit 1, miss 1, error 0; no key for a 404;
+  health UP without Redis.
+
+**Carry-forward items**
+- The cache is off by default (D-044): writes do not evict yet. Phase 10 turns it on after adding eviction.
+- Lettuce's default command timeout is 60 seconds; Phase 10 sets short timeouts and tests a Redis outage.
+- The `bench` profile has no Redis settings yet; Phase 11 adds them for the cache on/off benchmark.
+
 <!-- BUILD FLOW 01.10.03 — Environment -->
 ## Environment (inspected 2026-10-20)
 
@@ -196,19 +211,18 @@ All ran on 2026-10-22. Full details are in `BUILD_GUIDE.md`, Phase 08, and the e
 | GitHub repository and sign-in | — | Done on 2026-10-20: public repository created with the GitHub CLI; pushes verified |
 | `workflow` token scope for pushing CI files | Phase 14 | Pending. The current tokens are not known to include `workflow`, which GitHub requires for pushing files under `.github/workflows/`. Plan: `gh auth refresh -s workflow` when needed |
 | AWS account access and approval of instance, region, and cost | Phase 15 | Pending |
-| Anything blocking Phase 09 | — | None (Docker Desktop must be running; Redis already runs in the dev Compose file since Phase 03) |
+| Anything blocking Phase 10 | — | None (Docker Desktop must be running; it is installed per user and may need starting) |
 
 <!-- BUILD FLOW 01.10.05 — Next action -->
 ## Next action
 
-Next: Phase 09 (plan §9 and §14).
-1. Record Phase 08's commit hash in the commits table above.
-2. Add Spring Data Redis. Cache-aside for the product-detail DTO only (`GET /api/v1/products/{id}`): check Redis, on a
-   miss read MySQL and store the JSON with a TTL. Search stays on MySQL.
-3. Key `catalog:v1:product:{id}`, explicit JSON compatible with Spring Boot 4 and Jackson 3, a configurable 60-second
-   TTL, no caching of missing products, a switch that turns the cache off, and hit, miss, and error metrics.
-   Planned: explicit service-level code rather than annotations, so behavior and failures stay visible.
-4. Tests against real Redis (Testcontainers): a miss stores the value, a hit skips MySQL, the JSON round-trips, the TTL
-   expires. Inspect keys and TTLs with `redis-cli`.
-5. Write `docs/CACHING.md` (Phase 10 completes it: after-commit eviction, Redis outages, the stale-read race).
-6. Commit `feat(cache): cache product details in Redis`, push, and verify on GitHub.
+Next: Phase 10 (plan §9 and §14).
+1. Record Phase 09's commit hash in the commits table above.
+2. Evict `catalog:v1:product:{id}` after create, update, and delete transactions have **committed** (planned: a
+   transactional event listener in the `AFTER_COMMIT` phase; for create, the generated id). A rollback evicts nothing.
+3. Short Redis timeouts; reads fall back to MySQL during a Redis outage. An eviction failure is logged and counted and
+   never turns a committed write into an error.
+4. Switch the cache on (D-044), and document the stale-read race and cache stampedes in `docs/CACHING.md`.
+5. Tests: invalidation after each write, rollback leaves the cache alone, fallback with Redis stopped, the
+   eviction-failure path.
+6. Commit `feat(cache): handle committed writes and Redis failures`, push, and verify on GitHub.

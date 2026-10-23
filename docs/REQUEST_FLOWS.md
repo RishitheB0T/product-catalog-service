@@ -11,9 +11,10 @@ Runtime role: None. It documents runtime order; it is not executed.
 # Request Flows — what happens at runtime, step by step
 
 > **Status:** Flow 0 (health check) has been real since Phase 02. Flows 2, 4, and 5 have been real since Phase 05,
-> except their cache steps (`READ-04`, `READ-07`, `WRITE-07`; Phases 09–10). Flow 1 (search) has been real since
-> Phase 06, except its browser steps (Phase 12). Flows 3 and 6 arrive in Phases 09–10. Steps name the real classes
-> and methods once their phase has landed.
+> except their cache steps. The cache's read steps (`READ-04`, `READ-07`, and Flow 3) are real since Phase 09 but
+> switched off by default until eviction after writes (`WRITE-07`) and the outage handling of Flow 6 land in Phase 10.
+> Flow 1 (search) has been real since Phase 06, except its browser steps (Phase 12). Steps name the real classes and
+> methods once their phase has landed.
 
 Step IDs describe **runtime order**, not file-creation order (see "Two numbering systems" in `BUILD_GUIDE.md`).
 
@@ -73,11 +74,11 @@ Example: `GET /api/v1/products/42`
 |---|---|---|---|
 | READ-01 | Client (the detail page from Phase 13) | Sends `GET /api/v1/products/42` | 05 / 13 |
 | READ-02 | `ProductController.getProduct` | Spring converts `{id}` to a `long` (non-numeric → 400) and calls the service | 05 |
-| READ-03 | `ProductService.getProduct` | The proxy begins a read-only transaction. From Phase 09 the service asks the detail cache first | 05 / 09 |
-| READ-04 | Redis | `GET catalog:v1:product:42`. Hit → `READ-04H`. Miss → `READ-05`. Error → `READ-04X` | 09 / 10 |
-| READ-05 | `ProductRepository.findById` → MySQL | `SELECT … FROM product WHERE id = 42`. No row → `ProductNotFoundException` → 404 `product-not-found`, and nothing is cached | 05 |
+| READ-03 | `ProductService.getProduct` | Since Phase 09 no transaction yet: the service first asks `ProductDetailCache` (when `catalog.cache.enabled` is true) | 05 / 09 |
+| READ-04 | `ProductDetailCache.get` → Redis | `GET catalog:v1:product:42`. Hit → `READ-04H`. Miss → `READ-05` (counted as `miss`). Error → `READ-04X` (counted as `error`, logged) | 09 / 10 |
+| READ-05 | `ProductRepository.findById` → MySQL | In a read-only transaction that covers only this read and `READ-06`: `SELECT … FROM product WHERE id = 42`. No row → `ProductNotFoundException` → 404 `product-not-found`, and nothing is cached | 05 / 09 |
 | READ-06 | `ProductMapper.toResponse` | Entity → `ProductResponse` inside the transaction, which then ends | 05 |
-| READ-07 | Redis | `SET catalog:v1:product:42 <json>` with a 60-second TTL | 09 |
+| READ-07 | `ProductDetailCache.put` → Redis | After the transaction: `SET catalog:v1:product:42 <json>` with a 60-second TTL. A failure is logged and counted; the response is unaffected | 09 |
 | READ-08 | Controller → client | `200 OK` with JSON | 05 |
 
 ## Flow 3 — Product detail, cache hit
@@ -138,4 +139,5 @@ this can last. Details and possible mitigations will be documented in `docs/CACH
 | 2 — Detail | `ProductControllerTest` (`READ-02`, the JSON of `READ-08`); `ProductServiceTest` (`READ-03` to `READ-06`); `ProductApiIntegrationTest` (every step over HTTP, including 404 after a delete) |
 | 4 — Write | `ProductServiceTest` (`WRITE-04` to `WRITE-06`); `ProductApiIntegrationTest` (`WRITE-01` to `WRITE-08` over HTTP: the lifecycle, 403 under `prod`, 400 before 403, and ten simultaneous updates that end as one 200 and nine 409s) |
 | 5 — Rollback | `ProductServiceTest.failedUpdateIsRolledBackCompletely`; `ProductApiIntegrationTest.aFailedUpdateChangesNothing` (the same rollback, seen over HTTP) |
-| 3 and 6 — Cache | Arrive with the cache in Phases 09–10 |
+| 3 — Cache hit | `ProductDetailCacheTest` (`READ-04` to `READ-07` and `READ-04H` against real Redis: miss, hit without MySQL, JSON round trip, expiry, an unreadable value) |
+| 6 — Redis outage | Arrives in Phase 10 |

@@ -79,7 +79,7 @@ history, with a pointer to its replacement).
   buttons is not security.
 - **Implementation:** see D-026 (403 Forbidden, checked in the service, off by default). Phases 14–15 deploy it.
 
-## D-008 · Cache only product details first; search stays on MySQL — Planned (Phase 09)
+## D-008 · Cache only product details first; search stays on MySQL — Accepted (implemented in Phase 09)
 
 - **Why:** a detail key maps to exactly one row, so invalidation is precise. Search results depend on many rows and
   on the filters, so caching them would need broad invalidation.
@@ -455,12 +455,47 @@ history, with a pointer to its replacement).
   A per-statement optimizer setting was measured and does not help.
 - **Revisit:** when Phase 11 shows these requests matter, or the catalog grows beyond about 100,000 products.
 
+## D-042 · Redis is not part of the health check — Accepted (Phase 09)
+
+- **Decision:** `management.health.redis.enabled: false`. Health and readiness report MySQL (and the JVM), not Redis.
+- **Why:** the cache only speeds up reads; without it, product details come from MySQL. If Redis counted towards
+  health, a cache outage would mark the service DOWN, and a load balancer or container platform would stop sending it
+  traffic, turning a slowdown into an outage.
+- **Trade-off:** a broken Redis does not show up in health. It shows up in the `error` count of the cache metric and
+  in the logs instead.
+
+## D-043 · Explicit cache-aside code, JSON written by the application's mapper — Accepted (Phase 09)
+
+- **Decision:** `ProductDetailCache` (a small component using `StringRedisTemplate`) is called directly by
+  `ProductService.getProduct`; no `@Cacheable` annotations. Values are `ProductResponse` JSON written by the
+  application's own Jackson 3 `JsonMapper`. The read-only database transaction covers only the MySQL read.
+- **Why:** every step stays visible and testable: what is looked up, when it is stored, which failures are caught and
+  counted. Annotations hide those steps in a proxy, where self-invocation silently disables them and failure handling
+  is harder to control. The application's mapper makes the cached JSON identical to the API's.
+- **Alternatives:** Spring's cache abstraction (`@Cacheable` with `RedisCacheManager`): less code, but implicit;
+  Java serialization (binary, fragile across class changes, unreadable in `redis-cli`).
+- **Trade-off:** more lines of code than one annotation.
+
+## D-044 · The cache ships switched off until writes clear it — Accepted (Phase 09)
+
+- **Decision:** `catalog.cache.enabled` defaults to `false` in Phase 09; tests and manual checks enable it explicitly.
+  Phase 10 adds after-commit eviction and turns it on.
+- **Why:** without eviction, an updated or deleted product could be served from Redis for up to 60 seconds. A feature
+  that is correct only after the next phase should not be on in between.
+
+## D-045 · Small idle connection pools in tests — Accepted (Phase 09)
+
+- **Decision:** `TestcontainersConfiguration` sets `spring.datasource.hikari.minimum-idle=1` for every test
+  application (pools still grow to 10 when needed). `TestcontainersConfigurationTest` checks that it applies.
+- **Why:** Spring keeps each distinct test configuration's application, and with it its connection pool, for reuse.
+  Thirteen configurations with 10 idle connections each would approach MySQL's limit of 151 (D-036).
+
 <!-- BUILD FLOW 01.08.03 — Open questions -->
 ## Open questions (each is decided in its phase)
 
 | Question | Phase |
 |---|---|
-| Cache code style (explicit service code proposed) and eviction mechanism (an after-commit listener proposed) | 09–10 |
+| Cache eviction mechanism (an after-commit listener proposed); the cache code style is decided in D-043 | 10 |
 | Routing: React Router or a small hand-written router | 12 |
 | Product images: self-hosted licensed files or licensed remote URLs | 12 |
 | Nginx image: official or unprivileged variant | 14 |
