@@ -10,9 +10,9 @@ Runtime role: None. It documents runtime order; it is not executed.
 
 # Request Flows — what happens at runtime, step by step
 
-> **Status:** Flow 0 (health check) has been real since Phase 02. Flows 2, 4, and 5 have been real since Phase 05,
-> except their cache steps. The cache's read steps (`READ-04`, `READ-07`, and Flow 3) are real since Phase 09 but
-> switched off by default until eviction after writes (`WRITE-07`) and the outage handling of Flow 6 land in Phase 10.
+> **Status:** Flow 0 (health check) has been real since Phase 02. Flows 2, 4, and 5 have been real since Phase 05.
+> Their cache steps arrived in Phases 09 (reads, Flow 3) and 10 (eviction after writes, `WRITE-07`, and the outage
+> handling of Flow 6); the cache is on by default since Phase 10.
 > Flow 1 (search) has been real since Phase 06, except its browser steps (Phase 12). Steps name the real classes and
 > methods once their phase has landed.
 
@@ -88,10 +88,11 @@ Example: `GET /api/v1/products/42`
 
 ## Flow 6 — Redis outage during a product-detail read
 
-`READ-01` to `READ-04` as above. At **`READ-04X`** Redis times out quickly or refuses the connection. The error is
-logged and counted. It is *not* treated as "product missing". The flow continues with `READ-05` (MySQL) and
-`READ-06`. `READ-07` either fails harmlessly or is skipped, and `READ-08` returns the correct product, just more
-slowly. (Phase 10)
+`READ-01` to `READ-04` as above. At **`READ-04X`** the Redis command gives up after its 200 ms timeout (a hung or
+stopped Redis) and Spring reports a `QueryTimeoutException`. `ProductDetailCache` logs it and counts it as `error`; it
+is *not* treated as "product missing". The flow continues with `READ-05` (MySQL) and `READ-06`. `READ-07` times out
+too and is counted, and `READ-08` returns the correct product, just more slowly: about 430 ms instead of 10–15 ms,
+measured with Redis stopped. (Phase 10; `ProductCacheOutageTest` pauses Redis to prove it.)
 
 <!-- BUILD FLOW 01.07.04 — Flows 4 and 5: writes -->
 ## Flow 4 — Successful write
@@ -106,7 +107,7 @@ Example: `PUT /api/v1/products/42`
 | WRITE-04 | `ProductService.updateProduct` | The proxy begins a transaction. `requireWritesEnabled` refuses the request with 403 `writes-disabled` when `catalog.writes-enabled` is false; nothing is written | 05 |
 | WRITE-05 | `ProductRepository.findById` → MySQL | Loads row 42 (missing → 404). The request's version must equal the stored one (otherwise 409 `version-conflict`). `ProductMapper.applyUpdate` copies the new values | 05 |
 | WRITE-06 | `saveAndFlush` → MySQL, then commit | Hibernate sends `UPDATE … SET …, version = 8 WHERE id = 42 AND version = 7`. No matching row (a concurrent change) → 409 `version-conflict`; another product's SKU → 409 `duplicate-sku`. Otherwise the method returns and the transaction commits | 05 |
-| WRITE-07 | After-commit listener | Deletes `catalog:v1:product:42` (for create, the generated id). If that fails, it is logged and counted, and the committed write is still reported as a success | 10 |
+| WRITE-07 | `ProductCacheEvictionListener` → `ProductDetailCache.evict` → Redis | The service published `ProductChangedEvent(42)` inside the transaction; only after the commit does Spring call the listener, which deletes `catalog:v1:product:42` (for create, the generated id). If that fails, it is logged and counted, and the committed write is still reported as a success | 10 |
 | WRITE-08 | Controller → client | `200 OK` with the new state (update), `201 Created` with `Location` (create), or `204 No Content` (delete) | 05 |
 
 Note on the order: request validation (`WRITE-02`) happens before the write switch (`WRITE-04`), so an invalid
@@ -118,16 +119,18 @@ request to a read-only deployment receives 400, not 403.
 belongs to another product (error 1062). `ProductService` translates the `DataIntegrityViolationException` into
 `DuplicateSkuException`, which leaves the `@Transactional` method, so at **`WRITE-06R`** the proxy rolls the
 transaction back: every change made in it is undone, including fields such as the name that were valid on their own
-(`ProductServiceTest.failedUpdateIsRolledBackCompletely` proves this). After-commit work never runs, so from Phase 10
-the cache is untouched. `ApiExceptionHandler` answers 409 `duplicate-sku`.
+(`ProductServiceTest.failedUpdateIsRolledBackCompletely` proves this). After-commit work never runs, so the cache is
+untouched; it needs no change, because MySQL did not change either (`ProductCacheInvalidationTest` proves this).
+`ApiExceptionHandler` answers 409 `duplicate-sku`.
 
 <!-- BUILD FLOW 01.07.05 — Known limits -->
-## Known limit (preview of Phase 10)
+## Known limit: the stale-read race
 
 A stale read is still possible. Request A misses the cache and reads version 7 from MySQL. Request B updates the
 product to version 8, commits, and evicts the key, which is not in Redis yet, so nothing is removed. Request A then
-stores its old version-7 JSON in Redis. Readers get the stale copy until the TTL expires. The TTL limits how long
-this can last. Details and possible mitigations will be documented in `docs/CACHING.md` (Phases 09–10).
+stores its old version-7 JSON in Redis. Readers get the stale copy until the TTL expires, at most 60 seconds.
+`ProductCacheInvalidationTest.aSlowReaderCanStillStoreAnOldCopyAfterAWrite` plays these steps in order; possible
+mitigations are in `docs/CACHING.md`.
 
 <!-- BUILD FLOW 01.07.07 — Tests that walk through each flow (added in Phase 07) -->
 ## Tests that walk through each flow
@@ -140,4 +143,5 @@ this can last. Details and possible mitigations will be documented in `docs/CACH
 | 4 — Write | `ProductServiceTest` (`WRITE-04` to `WRITE-06`); `ProductApiIntegrationTest` (`WRITE-01` to `WRITE-08` over HTTP: the lifecycle, 403 under `prod`, 400 before 403, and ten simultaneous updates that end as one 200 and nine 409s) |
 | 5 — Rollback | `ProductServiceTest.failedUpdateIsRolledBackCompletely`; `ProductApiIntegrationTest.aFailedUpdateChangesNothing` (the same rollback, seen over HTTP) |
 | 3 — Cache hit | `ProductDetailCacheTest` (`READ-04` to `READ-07` and `READ-04H` against real Redis: miss, hit without MySQL, JSON round trip, expiry, an unreadable value) |
-| 6 — Redis outage | Arrives in Phase 10 |
+| 4 and 5 — Cache after writes | `ProductCacheInvalidationTest` (`WRITE-07`: update, delete, and create evict after the commit; a rolled-back update evicts nothing; the stale-read race played step by step) |
+| 6 — Redis outage | `ProductCacheOutageTest` (Redis paused: reads answered from MySQL within the timeouts, a write committed and reported as a success while its eviction failed and was counted, and the cache working again afterwards) |

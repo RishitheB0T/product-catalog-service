@@ -25,6 +25,13 @@ spring:
     url: jdbc:mysql://127.0.0.1:${MYSQL_HOST_PORT:24306}/catalog_bench?connectionTimeZone=UTC&rewriteBatchedStatements=true
     username: ${MYSQL_USER:catalog}
     password: ${MYSQL_PASSWORD:}
+  # BUILD FLOW 08.01.04 — Redis (added in Phase 10)
+  # The same local Redis as the dev profile. The cache is on by default since Phase 10; the Phase 11 benchmarks run
+  # this profile with catalog.cache.enabled true and false.
+  data:
+    redis:
+      host: 127.0.0.1
+      port: ${REDIS_HOST_PORT:24379}
 
 # BUILD FLOW 08.01.03 — What the profile does
 catalog:

@@ -861,3 +861,85 @@ GET /api/v1/products/7 ─► ProductController ─► ProductService.getProduct
             ─► ProductDetailCache.put ─► Redis SET … EX 60 ─► return
    counters: catalog.product.cache{result=hit|miss|error}
 ```
+
+<!-- BUILD FLOW 01.05.12 — Phase 10 -->
+## Phase 10 — Cache eviction after commit, and Redis failures
+
+**What we had before.** A tested read-through-the-cache path, switched off because writes did not clear cached copies,
+and a Redis client that would wait up to 60 seconds for an answer.
+
+**What we add.** Every committed create, update, and delete evicts the product's key through a transactional event
+(after the commit, never after a rollback); 200 ms Redis timeouts with MySQL as the fallback; eviction counters; the
+cache switched on; tests for invalidation, rollback, the documented race, and a real Redis outage.
+
+**Why.** A cache is only worth having if it never serves a change that was rolled back, rarely serves an outdated one,
+and never makes the service fail when the cache itself fails.
+
+**Files in order**
+
+| BUILD FLOW | File | Role |
+|---|---|---|
+| 10.01 | `backend/src/main/java/com/example/catalog/product/ProductChangedEvent.java` | "Product N changed" |
+| 10.02 | `backend/src/main/java/com/example/catalog/product/ProductCacheEvictionListener.java` | Evicts after the commit |
+| 10.03 | `backend/src/test/java/com/example/catalog/product/ProductCacheInvalidationTest.java` | Eviction, rollback, the race |
+| 10.04 | `backend/src/test/java/com/example/catalog/product/ProductCacheOutageTest.java` | Redis paused mid-test |
+
+Modified: `ProductDetailCache.java` (09.02.05: `evict` and its counters); `ProductService.java` (05.10.08: writes
+publish `ProductChangedEvent`); `application.yml` (02.06.06: cache on; 02.06.08: 200 ms timeouts);
+`application-bench.yml` (08.01.04: the local Redis address); `ProductDetailCacheTest.java` (09.03.05: switches the
+cache off explicitly); `docs/CACHING.md` (rewritten for writes, failures, and limits); README (status, tests, and the
+production-style run with Redis variables).
+
+**Relevant syntax**
+- *Events*: `ApplicationEventPublisher.publishEvent(new ProductChangedEvent(id))`,
+  `@TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)`.
+- *Redis*: `StringRedisTemplate.delete(key)`; `spring.data.redis.timeout` and `connect-timeout` as durations.
+- *Testcontainers*: `container.getDockerClient().pauseContainerCmd(id).exec()` and `unpauseContainerCmd`, always
+  in `finally`; `@Qualifier("redisContainer")` to pick one of two container beans.
+- *Spring internals (read with `javap`)*: `TransactionalApplicationListenerSynchronization` runs after-commit
+  listeners in `afterCompletion`; `TransactionSynchronizationUtils.invokeAfterCompletion` logs their exceptions.
+
+**Commands we ran** (PowerShell)
+
+| Command | Purpose |
+|---|---|
+| `javap -c` on Spring's transactional event classes | Confirm what happens to an exception in an after-commit listener |
+| `.\mvnw.cmd -B -ntp clean verify` | Build and run all 107 tests |
+| `java -jar … --spring.profiles.active=dev`, a scripted create, read, update, read with `curl.exe`; `docker compose stop redis`, reads and an update, `docker compose start redis`, delete; the metrics endpoint | Eviction and a stopped Redis on the real dev stack |
+| The README's production-style block with the new `SPRING_DATA_REDIS_*` variables | Make sure the documented commands work |
+
+**Expected behavior.** A write removes the key once it has committed and never after a rollback; with Redis down,
+every request still succeeds within a fraction of a second; failed evictions are counted, never reported as failed
+writes.
+
+**Actual checks** (2026-10-29)
+
+| Check | Result |
+|---|---|
+| `clean verify` | 107 tests, 0 failures, on the first run (100 earlier, now all with the cache on; 5 invalidation; 2 outage) |
+| Outage test log | Each cache step gave up after about 200–230 ms with `QueryTimeoutException: Redis command timed out`; one failed eviction logged; no "afterCompletion threw exception" anywhere |
+| Dev stack, Redis up | POST 201; first GET 90 ms (miss), second 14 ms (hit), TTL 59; after PUT the key was gone at once and the next GET showed version 1 |
+| Dev stack, Redis stopped | Three GETs 430–435 ms each with correct data; PUT 200 in 253 ms (version 2; its eviction failed and was counted); GET showed the new name |
+| Redis started again | GET 55 ms (miss), then 9 ms (hit); DELETE 204 removed the key; GET 404 |
+| Metrics after the script | hit 2, miss 4, error 8; evictions done 3, failed 1 |
+| README production-style run | Health UP without details; GET 200 twice with the key in Redis; POST 403; no cache warnings |
+
+Mistakes and findings on the way:
+- **A timeout is not a cancellation.** Commands sent to a paused Redis still run once it resumes, so a "failed"
+  eviction can happen later after all. The outage test therefore checks behavior during the outage and uses fresh keys
+  afterwards.
+- **The failed eviction in the manual run left nothing stale**, but only because the dev Redis keeps no data across a
+  restart. A Redis that merely hung would have kept the old copy until its TTL ended; `docs/CACHING.md` says so.
+- **Two of my own helper lines failed**: a log filter cut strings by the original line's length, and a stop command
+  looked up the process by its port and found nothing. Both were noticed in their output; the jar was then stopped by
+  its command line, and every port was checked free.
+
+**How the pieces connect**
+
+```text
+PUT /api/v1/products/42 ─► ProductService.updateProduct (transaction)
+   ─► UPDATE … WHERE version = ? ─► publishEvent(ProductChangedEvent(42)) ─► commit
+   ─► Spring afterCompletion(COMMITTED) ─► ProductCacheEvictionListener ─► ProductDetailCache.evict ─► Redis DEL
+   rollback instead? the listener never runs
+Redis hung or down: every Redis step gives up after 200 ms ─► counted ─► MySQL answers; writes still succeed
+```

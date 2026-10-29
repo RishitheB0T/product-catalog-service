@@ -173,10 +173,10 @@ class ProductDetailCacheTest {
         }
     }
 
-    // BUILD FLOW 09.03.05 — Switched off (the default in Phase 09)
-    // The same configuration as most other test classes, so Spring reuses their application.
+    // BUILD FLOW 09.03.05 — Switched off
+    // The default in Phase 09; since Phase 10 the cache is on by default, so this test switches it off explicitly.
     @Nested
-    @SpringBootTest
+    @SpringBootTest(properties = "catalog.cache.enabled=false")
     @Import(TestcontainersConfiguration.class)
     class WithTheCacheOff {
 

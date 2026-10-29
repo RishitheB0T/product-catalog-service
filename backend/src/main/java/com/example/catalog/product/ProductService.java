@@ -5,15 +5,17 @@
  *          refuses writes in read-only deployments, checks versions, and translates database errors into domain errors.
  * Depends on: ProductRepository (04.04), ProductMapper (05.05), CatalogProperties (05.01), the exceptions 05.06–05.09;
  *             for search ProductSearchRequest (06.04), ProductSpecifications (06.06), and PageResponse (06.05); since
- *             Phase 09 ProductDetailCache (09.02) and the transaction manager, for reads of one product.
+ *             Phase 09 ProductDetailCache (09.02) and the transaction manager, for reads of one product; since Phase 10
+ *             Spring's event publisher, to announce committed writes (ProductChangedEvent, 10.01).
  * Called by: ProductController (05.11).
  * Runtime role: The business-logic step of every product request (runtime steps READ-03, SEARCH-04 to SEARCH-06, and
- *               WRITE-04 to WRITE-06).
+ *               WRITE-04 to WRITE-07).
  */
 package com.example.catalog.product;
 
 import java.util.Optional;
 
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -44,18 +46,20 @@ public class ProductService {
     private final CatalogProperties properties;
     private final ProductDetailCache cache;
     private final TransactionTemplate readOnlyTransaction;
+    private final ApplicationEventPublisher events;
 
     // Constructor injection, as in DemoDataLoader (04.06): Spring passes in the beans this class needs. The transaction
     // manager is the same one @Transactional uses; a TransactionTemplate built from it runs code in a transaction
     // explicitly, here marked read-only like @Transactional(readOnly = true).
     public ProductService(ProductRepository repository, ProductMapper mapper, CatalogProperties properties,
-            ProductDetailCache cache, PlatformTransactionManager transactionManager) {
+            ProductDetailCache cache, PlatformTransactionManager transactionManager, ApplicationEventPublisher events) {
         this.repository = repository;
         this.mapper = mapper;
         this.properties = properties;
         this.cache = cache;
         this.readOnlyTransaction = new TransactionTemplate(transactionManager);
         this.readOnlyTransaction.setReadOnly(true);
+        this.events = events;
     }
 
     // BUILD FLOW 05.10.02 — Reading one product, cache-aside (runtime steps READ-03 to READ-07; cache since Phase 09)
@@ -65,7 +69,7 @@ public class ProductService {
     // 3. Store the DTO in the cache (READ-07), after the transaction has ended.
     // The transaction deliberately covers only step 2: with @Transactional on this method, every request, even a cache
     // hit, would borrow a database connection, and Redis calls would run while holding it. A missing product throws in
-    // step 2, so it is never cached. (Writes do not clear the cache until Phase 10; see application.yml, 02.06.06.)
+    // step 2, so it is never cached. Writes clear the cached copy once they have committed (05.10.08).
     public ProductResponse getProduct(long id) {
         Optional<ProductResponse> cached = cache.get(id);
         if (cached.isPresent()) {
@@ -88,6 +92,11 @@ public class ProductService {
         return PageResponse.from(page.map(mapper::toResponse));
     }
 
+    // BUILD FLOW 05.10.08 — Announcing a write (runtime step WRITE-07; added in Phase 10)
+    // Each write below publishes ProductChangedEvent once its SQL has succeeded, still inside its transaction. Spring
+    // delivers the event to ProductCacheEvictionListener (10.02) only after the transaction commits, so a write that
+    // fails later, or rolls back, clears nothing. For a create, the event carries the id MySQL just generated.
+
     // BUILD FLOW 05.10.03 — Creating a product
     // saveAndFlush sends the INSERT now instead of at commit, so a duplicate SKU fails inside this method, where it can
     // be translated. The exception then leaves the method, and the proxy rolls the transaction back.
@@ -95,6 +104,7 @@ public class ProductService {
     public ProductResponse createProduct(ProductCreateRequest request) {
         requireWritesEnabled();
         Product saved = saveAndFlush(mapper.toNewEntity(request), request.sku());
+        events.publishEvent(new ProductChangedEvent(saved.getId()));
         return mapper.toResponse(saved);
     }
 
@@ -111,11 +121,14 @@ public class ProductService {
             throw new VersionConflictException(id, request.version(), product.getVersion());
         }
         mapper.applyUpdate(product, request);
+        ProductResponse updated;
         try {
-            return mapper.toResponse(saveAndFlush(product, request.sku()));
+            updated = mapper.toResponse(saveAndFlush(product, request.sku()));
         } catch (ObjectOptimisticLockingFailureException e) {
             throw new VersionConflictException(id, request.version(), null);
         }
+        events.publishEvent(new ProductChangedEvent(id));
+        return updated;
     }
 
     // BUILD FLOW 05.10.05 — Deleting a product
@@ -131,6 +144,7 @@ public class ProductService {
         } catch (ObjectOptimisticLockingFailureException e) {
             throw new VersionConflictException(id, product.getVersion(), null);
         }
+        events.publishEvent(new ProductChangedEvent(id));
     }
 
     // BUILD FLOW 05.10.06 — Shared steps

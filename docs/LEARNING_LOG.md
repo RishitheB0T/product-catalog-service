@@ -368,3 +368,35 @@ Concepts in the order we met them, each with small practice exercises.
 4. Put "not json" into a key with `redis-cli SET`, read the product through the API, and look at the key again. Which
    counter changed?
 5. Why would including Redis in the health check be dangerous behind a load balancer?
+
+<!-- BUILD FLOW 01.09.11 — Phase 10 -->
+## Phase 10 — Eviction after commit, and Redis failures
+
+**Concepts**
+- **Invalidate after the commit.** Clearing a cached copy before the commit leaves a gap in which another request
+  stores the old, still-committed row again. After a rollback there is nothing to clear.
+- **Delete, don't update, on writes.** Concurrent writers could store values in the opposite order from their commits;
+  a delete is idempotent and lets the next read fetch what is committed.
+- **Transactional events.** Publish "what happened" inside the transaction; Spring delivers it in a chosen phase
+  (`AFTER_COMMIT`) only if the transaction got there.
+- **Timeouts as a design decision.** A client default of 60 seconds turns a hung dependency into a hung service. A
+  timeout well above normal latency and well below user patience bounds the damage.
+- **Graceful degradation, measured.** With Redis stopped the API stayed correct, just slower (about 430 ms per read).
+- **Never misreport a committed write.** Work after the commit (eviction) may fail; the write still succeeded.
+- **Client timeouts do not cancel server work.** A command the client gave up on may still run later.
+- **The stale-read race.** A slow reader can store an old copy after a writer's eviction; the TTL bounds it. Stronger
+  fixes: versioned compare-and-set, delayed double eviction, change-data-capture.
+- **Cache stampede.** Many requests missing the same key at once; coalescing, early refresh, or TTL jitter help.
+- **Testing failures for real.** Pausing a real container proves timeouts and fallbacks; a mock would only prove the
+  code calls what it was told to.
+
+**Exercises**
+1. Move the eviction into `updateProduct` itself, before the method returns (don't commit). Describe the interleaving
+   in which another request re-caches the old product.
+2. In `ProductCacheOutageTest`, why does the read take about 400 ms and not 200 ms?
+3. Set `spring.data.redis.timeout` back to its default on a scratch branch and run `ProductCacheOutageTest`. What
+   happens, and how long does it take?
+4. Explain why `aSlowReaderCanStillStoreAnOldCopyAfterAWrite` passes, and name one way to make the stale copy
+   impossible.
+5. With the dev stack running, stop Redis (`docker compose … stop redis`), update a product, start Redis again, and
+   read the product. Is it outdated? Why not, here, and when would it be?

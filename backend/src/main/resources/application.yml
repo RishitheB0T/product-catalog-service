@@ -44,18 +44,28 @@ spring:
     # Where the versioned migrations live. This is Flyway's default, written down to make it visible.
     locations: classpath:db/migration
 
+  # BUILD FLOW 02.06.08 — Redis client timeouts (added in Phase 10)
+  # The Redis client (Lettuce) waits up to 60 seconds for an answer by default; a hung Redis would then hold every
+  # product request for a minute. A healthy local Redis answers in well under a millisecond, so 200 ms means "Redis is
+  # in trouble": the cache gives up, counts an error, and the request continues with MySQL (decision D-047).
+  # The address comes from each environment: the dev and bench profiles, the test containers, or environment variables.
+  data:
+    redis:
+      timeout: 200ms
+      connect-timeout: 200ms
+
 # BUILD FLOW 02.06.05 — This application's own settings (added in Phase 05)
 # Read through CatalogProperties (05.01).
 catalog:
   # Creating, updating, and deleting products. Off unless a profile turns it on, so a deployment that is missing its
   # settings stays read-only instead of becoming writable (a fail-safe default, decision D-026).
   writes-enabled: false
-  # BUILD FLOW 02.06.06 — Product-detail cache (added in Phase 09)
-  # Read through ProductCacheProperties (09.01). Off by default in Phase 09: creates, updates, and deletes do not clear
-  # cached products until Phase 10 adds after-commit eviction, so an enabled cache could serve an outdated product for
-  # up to one TTL. Tests and manual checks switch it on explicitly.
+  # BUILD FLOW 02.06.06 — Product-detail cache (added in Phase 09; on since Phase 10)
+  # Read through ProductCacheProperties (09.01). Phase 09 shipped it switched off, because writes did not yet clear
+  # cached products; since Phase 10 every committed create, update, and delete evicts its key, so it is on. Benchmarks
+  # switch it off to compare the same endpoint without it.
   cache:
-    enabled: false
+    enabled: true
     # How long a cached product stays in Redis: a longer TTL means more hits, a shorter one fresher data.
     product-ttl: 60s
 

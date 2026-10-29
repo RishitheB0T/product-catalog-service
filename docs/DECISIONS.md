@@ -476,12 +476,13 @@ history, with a pointer to its replacement).
   Java serialization (binary, fragile across class changes, unreadable in `redis-cli`).
 - **Trade-off:** more lines of code than one annotation.
 
-## D-044 · The cache ships switched off until writes clear it — Accepted (Phase 09)
+## D-044 · The cache ships switched off until writes clear it — Accepted (Phase 09); fulfilled in Phase 10
 
 - **Decision:** `catalog.cache.enabled` defaults to `false` in Phase 09; tests and manual checks enable it explicitly.
   Phase 10 adds after-commit eviction and turns it on.
 - **Why:** without eviction, an updated or deleted product could be served from Redis for up to 60 seconds. A feature
   that is correct only after the next phase should not be on in between.
+- **Phase 10:** after-commit eviction (D-046) and short timeouts (D-047) landed, and the default became `true`.
 
 ## D-045 · Small idle connection pools in tests — Accepted (Phase 09)
 
@@ -490,12 +491,40 @@ history, with a pointer to its replacement).
 - **Why:** Spring keeps each distinct test configuration's application, and with it its connection pool, for reuse.
   Thirteen configurations with 10 idle connections each would approach MySQL's limit of 151 (D-036).
 
+## D-046 · Evict after commit, through a transactional event — Accepted (Phase 10)
+
+- **Decision:** create, update, and delete publish `ProductChangedEvent(id)` inside their transaction;
+  `ProductCacheEvictionListener` deletes the key in `@TransactionalEventListener(phase = AFTER_COMMIT)`. Writes
+  delete the key rather than store the new value.
+- **Why after the commit:** evicting inside the transaction leaves a gap in which another request re-caches the old,
+  still-committed row. After a rollback nothing changed, so nothing is evicted.
+- **Why delete, not update:** two concurrent writers could store their values in the opposite order from their
+  commits; a delete is idempotent, and the next read stores whatever is committed.
+- **Why an event:** the service states what happened; the cache reacts. Spring checks the transaction's outcome, and
+  runs the listener in its `afterCompletion` callback, which logs exceptions instead of rethrowing them, so a
+  committed write is never reported as failed (checked in Spring Framework 7.0's bytecode).
+- **Alternatives:** `@CacheEvict` (runs when the method returns, which can be before the commit);
+  `TransactionSynchronizationManager.registerSynchronization` in the service (the same mechanism, less readable);
+  database change-data-capture (robust against every write path, but a large extra system).
+- **Trade-off:** the stale-read race in `docs/CACHING.md` remains possible; the TTL bounds it.
+
+## D-047 · 200 ms Redis timeouts, and MySQL as the fallback — Accepted (Phase 10)
+
+- **Decision:** `spring.data.redis.timeout` and `connect-timeout` are 200 ms. A failed cache step is logged, counted,
+  and replaced by MySQL; a failed eviction is logged and counted.
+- **Why:** the Redis client waits 60 seconds by default, so a hung Redis would hold every product request for a minute.
+  A local Redis answers in well under a millisecond, so 200 ms only fires when Redis is in trouble.
+- **Measured:** with Redis stopped, product reads still answered correctly in about 430 ms (two timeouts plus MySQL);
+  with Redis paused in a test, each step gave up after about 200–230 ms; writes succeeded throughout.
+- **Trade-off:** a slow but working Redis (for example during a long pause of its own) is treated as failed; and a
+  stopped Redis still costs two timeouts per read. Rejecting commands at once while disconnected, or a circuit
+  breaker, would remove that cost for a stopped Redis; documented as extensions.
+
 <!-- BUILD FLOW 01.08.03 — Open questions -->
 ## Open questions (each is decided in its phase)
 
 | Question | Phase |
 |---|---|
-| Cache eviction mechanism (an after-commit listener proposed); the cache code style is decided in D-043 | 10 |
 | Routing: React Router or a small hand-written router | 12 |
 | Product images: self-hosted licensed files or licensed remote URLs | 12 |
 | Nginx image: official or unprivileged variant | 14 |

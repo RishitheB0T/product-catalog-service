@@ -14,12 +14,12 @@ A product catalog built from an empty folder in documented phases, with every fi
 **Spring Boot** REST API over **MySQL**, **Redis** caching for product details, and a **React** storefront that
 uses the real API.
 
-> **Status: Phase 09 of 16 complete.** The product API searches the catalog (filters, sorting, pagination) and reads,
+> **Status: Phase 10 of 16 complete.** The product API searches the catalog (filters, sorting, pagination) and reads,
 > creates, updates, and deletes single products, with validation, optimistic locking, and one error format; production
-> settings are read-only. Search queries were measured on 100,000 products and indexed from the measured plans. A
-> Redis cache for product details is built and tested, but switched off until Phase 10 makes writes clear it.
-> 100 tests cover it, including full-stack tests over real HTTP. This README always describes what actually works;
-> anything not built yet is labeled *planned*.
+> settings are read-only. Search queries were measured on 100,000 products and indexed from the measured plans.
+> Product details are cached in Redis, cleared after every committed write, with MySQL as the fallback when Redis
+> fails. 107 tests cover it, including full-stack tests over real HTTP and a Redis outage. This README always
+> describes what actually works; anything not built yet is labeled *planned*.
 
 <!-- BUILD FLOW 01.04.01 — What works today -->
 ## What works today
@@ -34,8 +34,8 @@ uses the real API.
 | Search with filters, sorting, and pagination; validated parameters | Done (Phase 06) |
 | Full-stack API tests over real HTTP, including simultaneous requests; example requests | Done (Phase 07) |
 | Measured query optimization: 100,000-product benchmark data, `EXPLAIN ANALYZE` before and after, search indexes (V2) | Done (Phase 08) |
-| Redis product-detail cache: cache-aside reads, versioned keys, JSON, 60-second TTL, metrics; off by default | Done (Phase 09) |
-| Cache eviction after committed writes, Redis outage handling; cache switched on | Planned (Phase 10) |
+| Redis product-detail cache: cache-aside reads, versioned keys, JSON, 60-second TTL, metrics | Done (Phase 09) |
+| Cache eviction after committed writes, 200 ms Redis timeouts with MySQL fallback; cache switched on | Done (Phase 10) |
 | Benchmarks and performance report | Planned (Phase 11) |
 | React storefront and local admin | Planned (Phases 12–13) |
 | Production containers and CI | Planned (Phase 14) |
@@ -151,9 +151,8 @@ curl.exe http://localhost:24081/actuator/health
 
 You should see `"status":"UP"` together with component details, including `db` (MySQL), which only the dev profile
 shows. On the first start Flyway creates the product table, and the dev profile loads 24 demo products (log line
-`Loaded 24 demo products`). Stop the app with Ctrl+C. The Redis cache for product details is off until Phase 10;
-to try it, build the jar and start it with the cache on (see [`docs/CACHING.md`](docs/CACHING.md)):
-`java -jar target\catalog-0.0.1-SNAPSHOT.jar --spring.profiles.active=dev --catalog.cache.enabled=true` (in `backend`).
+`Loaded 24 demo products`). Stop the app with Ctrl+C. Product details are cached in the local Redis; how to look at
+the cache is in [`docs/CACHING.md`](docs/CACHING.md).
 
 - Keep the quotes around `-Dspring-boot.run.profiles=dev`. Windows PowerShell splits an unquoted argument like
   this at its first dot, so Maven would receive the wrong setting.
@@ -165,9 +164,9 @@ to try it, build the jar and start it with the cache on (see [`docs/CACHING.md`]
 "SELECT sku, name, category, price, stock_quantity FROM product LIMIT 5;" | docker compose --env-file infra\.env -f infra\compose.dev.yaml exec -T mysql sh -c 'MYSQL_PWD=$MYSQL_PASSWORD mysql -u $MYSQL_USER $MYSQL_DATABASE --table'
 ```
 
-**Production-style run of the packaged jar.** The `prod` profile contains no database settings on purpose: a server
-supplies them as environment variables, which Spring Boot maps onto its properties (`SPRING_DATASOURCE_URL` becomes
-`spring.datasource.url`). Here they point at the local MySQL container:
+**Production-style run of the packaged jar.** The `prod` profile contains no database or Redis settings on purpose:
+a server supplies them as environment variables, which Spring Boot maps onto its properties (`SPRING_DATASOURCE_URL`
+becomes `spring.datasource.url`). Here they point at the local MySQL and Redis containers:
 
 ```powershell
 cd backend
@@ -175,8 +174,13 @@ cd backend
 $env:SPRING_DATASOURCE_URL = "jdbc:mysql://127.0.0.1:24306/catalog?connectionTimeZone=UTC"
 $env:SPRING_DATASOURCE_USERNAME = "catalog"
 $env:SPRING_DATASOURCE_PASSWORD = (Select-String -LiteralPath ..\infra\.env -Pattern '^MYSQL_PASSWORD=(.*)$').Matches[0].Groups[1].Value
+$env:SPRING_DATA_REDIS_HOST = "127.0.0.1"
+$env:SPRING_DATA_REDIS_PORT = "24379"
 java -jar target\catalog-0.0.1-SNAPSHOT.jar --spring.profiles.active=prod --server.port=24082 --server.address=127.0.0.1
 ```
+
+Without the two Redis variables the application still works: every product read falls back to MySQL after the
+200 ms Redis timeout, and the cache counts errors.
 
 Expected: health without component details, no banner, and no demo data. The `$env:` variables last until you close
 that terminal. Without the last two options the jar would listen on Spring Boot's default, port 8080 on every network
@@ -281,7 +285,7 @@ cd backend
 .\mvnw.cmd verify
 ```
 
-100 tests in twelve classes. The first two start the whole application on a random port and call it over real HTTP,
+107 tests in fourteen classes. The first two start the whole application on a random port and call it over real HTTP,
 exactly as a client would:
 - `ProductApiIntegrationTest` (15): a product from creation to deletion, the exact JSON shape, fields a client may not
   set, every error type (400, 404, 405, 409, 415), a rollback seen through the API, Unicode text, ten simultaneous
@@ -306,6 +310,10 @@ exactly as a client would:
 - `ProductDetailCacheTest` (7) runs against real Redis: a miss stores the JSON with its TTL, a hit answers without
   MySQL, every field survives the round trip, missing products and a switched-off cache store nothing, an unreadable
   value is counted and replaced, and keys expire. `TestcontainersConfigurationTest` (2) checks the shared test setup.
+- `ProductCacheInvalidationTest` (5) proves that committed updates, deletes, and creates clear the cached copy, that a
+  rolled-back update clears nothing, and plays the remaining stale-read race step by step. `ProductCacheOutageTest`
+  (2) pauses the Redis container: reads still answer from MySQL within the timeouts, a write still succeeds while its
+  failed eviction is counted, and the cache works again afterwards.
 - `BenchmarkProductGeneratorTest` (4) checks that the benchmark data is reproducible (a pinned fingerprint for all
   100,000 products), valid by the API's own rules, and shaped like a real catalog; `BenchmarkDataSeederTest` (2)
   checks that it loads only with the `bench` profile, only into an empty table, and only once.

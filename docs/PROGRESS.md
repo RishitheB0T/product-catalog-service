@@ -17,8 +17,8 @@ Runtime role: None. Documentation only.
 
 | Item | Value |
 |---|---|
-| Current phase | **09 — complete** |
-| Next phase | 10 — committed writes and Redis failures: after-commit eviction, short timeouts, outage fallback; cache switched on |
+| Current phase | **10 — complete** |
+| Next phase | 11 — benchmarks and evidence: k6, cache on and off on the same endpoint, several trials |
 | Branch | `main`, tracking `origin/main` |
 | Repository | https://github.com/RishitheB0T/product-catalog-service (public) |
 | Last updated | 2026-10-22 |
@@ -36,7 +36,8 @@ Runtime role: None. Documentation only.
 | Phase 06 | `c0566a4` | `feat(search): add validated product search and pagination` | Pushed and verified |
 | Phase 07 | `fab9876` | `test(backend): verify catalog API and database behavior` | Pushed and verified |
 | Phase 08 | `837a972` | `perf(database): optimize measured catalog search queries` | Pushed and verified |
-| Phase 09 | Recorded at the start of Phase 10 | `feat(cache): cache product details in Redis` | Pushed and verified when committed |
+| Phase 09 | `bc82587` | `feat(cache): cache product details in Redis` | Pushed and verified |
+| Phase 10 | Recorded at the start of Phase 11 | `feat(cache): handle committed writes and Redis failures` | Pushed and verified when committed |
 
 <!-- BUILD FLOW 01.10.02 — Checks run in Phase 01 -->
 ## Checks run in Phase 01
@@ -183,7 +184,23 @@ All ran on 2026-10-23. Full details are in `BUILD_GUIDE.md`, Phase 09, and `docs
 **Carry-forward items**
 - The cache is off by default (D-044): writes do not evict yet. Phase 10 turns it on after adding eviction.
 - Lettuce's default command timeout is 60 seconds; Phase 10 sets short timeouts and tests a Redis outage.
-- The `bench` profile has no Redis settings yet; Phase 11 adds them for the cache on/off benchmark.
+- The `bench` profile has no Redis settings yet; Phase 11 adds them for the cache on/off benchmark. (Added in Phase 10.)
+
+<!-- BUILD FLOW 01.10.14 — Checks run in Phase 10 -->
+## Checks run in Phase 10
+
+All ran on 2026-10-29. Full details are in `BUILD_GUIDE.md`, Phase 10, and `docs/CACHING.md`.
+- `.\mvnw.cmd clean verify`: 107 tests, 0 failures, with the cache on in every test application.
+- The outage test paused Redis: cache steps gave up after about 200–230 ms; reads and a write still succeeded.
+- On the dev stack: a PUT removed the key at once; with Redis stopped, reads took about 430 ms with correct data and
+  an update succeeded while its eviction failed (counted); after a restart, hits returned.
+- The README's production-style run with the new Redis variables worked as written.
+
+**Carry-forward items**
+- A stopped Redis costs two 200 ms timeouts per product read; rejecting commands while disconnected or a circuit
+  breaker would remove that (D-047). Phase 11 can show whether it matters.
+- The stale-read race and stampedes remain documented limits (D-046, `docs/CACHING.md`).
+- Docker Desktop is installed per user; start it from its own install location if `docker info` fails.
 
 <!-- BUILD FLOW 01.10.03 — Environment -->
 ## Environment (inspected 2026-10-20)
@@ -211,18 +228,17 @@ All ran on 2026-10-23. Full details are in `BUILD_GUIDE.md`, Phase 09, and `docs
 | GitHub repository and sign-in | — | Done on 2026-10-20: public repository created with the GitHub CLI; pushes verified |
 | `workflow` token scope for pushing CI files | Phase 14 | Pending. The current tokens are not known to include `workflow`, which GitHub requires for pushing files under `.github/workflows/`. Plan: `gh auth refresh -s workflow` when needed |
 | AWS account access and approval of instance, region, and cost | Phase 15 | Pending |
-| Anything blocking Phase 10 | — | None (Docker Desktop must be running; it is installed per user and may need starting) |
+| Anything blocking Phase 11 | — | None (k6 runs from its Docker image; Docker Desktop must be running) |
 
 <!-- BUILD FLOW 01.10.05 — Next action -->
 ## Next action
 
-Next: Phase 10 (plan §9 and §14).
-1. Record Phase 09's commit hash in the commits table above.
-2. Evict `catalog:v1:product:{id}` after create, update, and delete transactions have **committed** (planned: a
-   transactional event listener in the `AFTER_COMMIT` phase; for create, the generated id). A rollback evicts nothing.
-3. Short Redis timeouts; reads fall back to MySQL during a Redis outage. An eviction failure is logged and counted and
-   never turns a committed write into an error.
-4. Switch the cache on (D-044), and document the stale-read race and cache stampedes in `docs/CACHING.md`.
-5. Tests: invalidation after each write, rollback leaves the cache alone, fallback with Redis stopped, the
-   eviction-failure path.
-6. Commit `feat(cache): handle committed writes and Redis failures`, push, and verify on GitHub.
+Next: Phase 11 (plan §11 and §14).
+1. Record Phase 10's commit hash in the commits table above.
+2. Reproducible k6 scripts (k6 from its pinned Docker image) against the `bench` profile on 100,000 products.
+3. Product detail: the same endpoint with `catalog.cache.enabled` false and true; warm the JVM and MySQL for both,
+   warm Redis only for the cache scenario; report cold behavior separately.
+4. Search: measured separately from the cache, against the Phase 08 indexes.
+5. Several trials each; report mean, median, p95, throughput, and error rate, with the raw results committed.
+6. Write `docs/PERFORMANCE.md` and fill the README's performance section only with measured numbers.
+7. Commit `perf: add reproducible catalog benchmarks and evidence`, push, and verify on GitHub.
