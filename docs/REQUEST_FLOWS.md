@@ -13,8 +13,8 @@ Runtime role: None. It documents runtime order; it is not executed.
 > **Status:** Flow 0 (health check) has been real since Phase 02. Flows 2, 4, and 5 have been real since Phase 05.
 > Their cache steps arrived in Phases 09 (reads, Flow 3) and 10 (eviction after writes, `WRITE-07`, and the outage
 > handling of Flow 6); the cache is on by default since Phase 10.
-> Flow 1 (search) has been real since Phase 06, except its browser steps (Phase 12). Steps name the real classes and
-> methods once their phase has landed.
+> Flow 1 (search) has been real since Phase 06, and its browser steps since Phase 12. Steps name the real classes,
+> methods, hooks, and components once their phase has landed.
 
 Step IDs describe **runtime order**, not file-creation order (see "Two numbering systems" in `BUILD_GUIDE.md`).
 
@@ -28,7 +28,7 @@ Step IDs describe **runtime order**, not file-creation order (see "Two numbering
 <!-- BUILD FLOW 01.07.01 — Where requests travel -->
 ## Where requests travel
 
-- **Development (Phases 03–13):** browser → Vite dev server on `localhost:24173` → proxies `/api` → Spring Boot on
+- **Development (Phases 03–13):** browser → Vite dev server on `127.0.0.1:24173` → proxies `/api` → Spring Boot on
   `127.0.0.1:24081` (running directly on Windows with the `dev` profile) → MySQL on `127.0.0.1:24306` and Redis on
   `127.0.0.1:24379`, both in Docker containers. Port choices: README "Ports".
 - **Production-style (Phase 14 onwards):** browser → Nginx (the only published port) → `app:8080` on the Compose
@@ -55,13 +55,13 @@ Example: `GET /api/v1/products?q=linen&category=HOME&page=0&size=20&sort=price_a
 
 | Step | Where | What happens | Phase |
 |---|---|---|---|
-| SEARCH-01 | Browser | The catalog page builds the query string from the filter state in the URL. A newer search cancels the older request | 12 |
-| SEARCH-02 | Vite proxy or Nginx | Forwards `/api/**` to Spring Boot | 12 / 14 |
+| SEARCH-01 | Browser: `useUrlState` → `App` → `useProductSearch` → `searchProducts` | A change (typing, paused for 300 ms by `SearchBox`; a category; a filter; the sort; a page) updates the state and the address bar with `pushState`. Typing uses `replaceState`, and every change except a page change returns to page 1. `toApiQuery` turns the state into the API's query string, with a zero-based page and `size=12`. The new query's effect aborts the previous request (`AbortController`), so a late answer can never overwrite newer results | 12 |
+| SEARCH-02 | Vite proxy or Nginx | Forwards `/api/**` to Spring Boot (development: `vite.config.js`) | 12 / 14 |
 | SEARCH-03 | Spring MVC data binding → `ProductController.searchProducts` | Builds a `ProductSearchRequest` from the query string: converts each value (`ProductSortConverter` for `sort`; a blank value counts as not sent), fills the defaults (page 0, size 20, `newest`), and validates it (`@Valid`: ranges, lengths, `@ValidPriceRange`). Values that cannot be converted → 400 `validation-failed` naming them (the rules run only once every value converts); broken rules → 400 `validation-failed` listing every one. Either way the service is never called and no SQL runs | 06 |
 | SEARCH-04 | `ProductService.searchProducts` | The proxy begins a read-only transaction. `ProductSpecifications.matching` builds the WHERE clause from the filters that were sent (bound parameters; `%`, `_`, and `!` escaped for LIKE). `ProductSort.toSort()` supplies the ORDER BY, always ending with `id` | 06 |
 | SEARCH-05 | `ProductRepository.findAll(specification, pageable)` → MySQL | The page query (`… WHERE … ORDER BY … LIMIT`), then a `COUNT` with the same WHERE clause unless the page itself reveals the total. Since Phase 08 the V2 indexes let a typical page query read its rows already in order and stop after `size` rows (0.08–0.66 ms on 100,000 products); counts still visit every matching row (`docs/QUERY_OPTIMIZATION.md`) | 06 / 08 |
 | SEARCH-06 | `ProductMapper.toResponse`, `PageResponse.from` | Entities become DTOs inside the transaction, the page becomes `{content, page, size, totalElements, totalPages}`, the transaction ends, and Jackson writes `200 OK` | 06 |
-| SEARCH-07 | Browser | Renders results, the result count, filter chips, and pagination | 12 |
+| SEARCH-07 | Browser: `App` and its components | Renders the grid (each photo on a mat, or a placeholder), "Showing 1–12 of N products", the filter chips, and pagination. Until the first answer it shows a skeleton; while a newer request loads, the old results stay dimmed (`aria-busy`). A 400 shows the API's field messages in plain words and a 5xx a general message, both with "Try again". An empty page offers "Clear all filters" or "Go to page 1" | 12 |
 
 Search never touches Redis. That is deliberate (plan §9).
 

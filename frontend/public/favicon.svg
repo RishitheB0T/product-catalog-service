@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- BUILD FLOW 12.06 — frontend/public/favicon.svg
+       First introduced: Phase 12
+       Purpose: The browser-tab icon: a charcoal square with the "F" of FORM drawn from straight lines, so it needs
+                no font. Depends on: nothing. Used by: index.html (12.05). Runtime role: a static file. -->
+  <rect width="32" height="32" rx="3" fill="#22211f" />
+  <path d="M11 7h11v3.2h-7.6v4.4h6.6v3.2h-6.6V25H11z" fill="#f6f3ee" />
+</svg>

@@ -1,0 +1,70 @@
+/*
+ * BUILD FLOW 12.08 — frontend/src/styles/tokens.css
+ * First introduced: Phase 12
+ * Purpose: The design tokens: every colour, font, size, space, and timing the storefront uses, named once.
+ * Depends on: Nothing.
+ * Used by: app.css (12.09), which refers to these names instead of raw values; loaded first by main.jsx (12.07).
+ * Runtime role: CSS custom properties on :root, available to every element.
+ */
+
+/* BUILD FLOW 12.08.01 — Colour
+   A warm off-white page, charcoal text, and one restrained sage accent. Text pairs were chosen for contrast: muted
+   text on the page background is about 6.4:1, the accent about 5.2:1, and white on the accent about 5.7:1, all above
+   the 4.5:1 that WCAG AA asks for body text. */
+:root {
+  --color-bg: #f6f3ee;
+  --color-surface: #fdfcfa;
+  --color-mat: #ebe6dd;
+  --color-text: #22211f;
+  --color-text-muted: #5c5851;
+  --color-border: #ddd6ca;
+  --color-border-strong: #b6ad9f;
+  --color-accent: #5b6b53;
+  --color-accent-strong: #46553f;
+  --color-accent-soft: #e2e7db;
+  --color-danger: #9a3a2e;
+  --color-skeleton: #e6e0d6;
+  --color-backdrop: rgb(34 33 31 / 0.42);
+
+  /* BUILD FLOW 12.08.02 — Type
+     System font stacks: no web-font download, no third-party request, and text appears at once. Headings use a
+     serif for the editorial voice; everything else a clean sans-serif. */
+  --font-serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-md: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.375rem;
+  --text-2xl: 1.75rem;
+  --text-hero: clamp(2.125rem, 1.5rem + 2.6vw, 3.5rem);
+  --tracking-wide: 0.14em;
+
+  /* BUILD FLOW 12.08.03 — Space and shape
+     A 4-pixel rhythm. Corners stay nearly square (2 px) for crisp, editorial edges rather than soft rounded cards. */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+  --space-8: 4rem;
+  --radius: 2px;
+  --radius-pill: 999px;
+  --content-width: 80rem;
+  --gutter: 1rem;
+  --tap-size: 2.75rem;
+
+  /* BUILD FLOW 12.08.04 — Motion */
+  --duration: 160ms;
+}
+
+@media (min-width: 48rem) {
+  :root { --gutter: 2rem; }
+}
+
+/* People who ask their system for less motion get no animations and no smooth scrolling. */
+@media (prefers-reduced-motion: reduce) {
+  :root { --duration: 0ms; }
+}

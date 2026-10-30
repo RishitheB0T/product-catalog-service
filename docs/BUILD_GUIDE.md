@@ -1048,3 +1048,125 @@ run-benchmarks.ps1 (keeps the computer awake; refuses to start on battery)
   ├─ Get-Disturbance: count the trial, repeat it, or stop everything
   └─ all trials counted, no sleep logged ─► k6-summaries.json ─► k6-report.md ─► PERFORMANCE.md, README
 ```
+
+<!-- BUILD FLOW 01.05.14 — Phase 12 -->
+## Phase 12 — The storefront catalog
+
+**What we had before.** A tested, measured API, but nothing for a shopper to look at.
+
+**What we add.** The React storefront "FORM — The Everyday Edit":
+- a header with search, a compact hero, and category tabs;
+- filters: a sidebar on wide screens, a modal drawer on narrow ones;
+- removable chips, sorting, pagination, and an accurate count;
+- the whole search kept in the address bar;
+- skeleton, empty, and error states;
+- seven licensed photos, with a placeholder for the other products;
+- tests and real-browser checks.
+
+**Why.** The storefront is how anyone experiences the catalog. It has to be fast to use, honest about what is
+loading or wrong, and shareable by URL.
+
+**Files in order**
+
+| BUILD FLOW | File | Role |
+|---|---|---|
+| 12.01–12.06 | `frontend/package.json`, `package-lock.json`, `vite.config.js`, `.oxlintrc.json`, `index.html`, `public/favicon.svg` | The project: dependencies, dev server and proxy, lint rules, the page |
+| 12.07 | `frontend/src/main.jsx` | Starts React |
+| 12.08–12.09 | `frontend/src/styles/tokens.css`, `app.css` | Design tokens, then every component's styles, mobile first |
+| 12.10–12.11 | `frontend/src/lib/catalog.js`, `photoCredits.js` | Pure rules (URL, API query, prices, pages, INR) and the photo credits |
+| 12.12 | `frontend/src/api/products.js` | The only network code; readable `ApiError`s |
+| 12.13–12.15 | `frontend/src/hooks/useUrlState.js`, `useDebouncedCallback.js`, `useProductSearch.js` | State in the address bar, debouncing, fetching with cancellation |
+| 12.16–12.28 | `frontend/src/components/*.jsx` | Header, hero, search, categories, filters, drawer, chips, toolbar, grid, card, pagination, status views, footer |
+| 12.29 | `frontend/src/App.jsx` | The page that connects them |
+| 12.30–12.32 | `frontend/src/test/setup.js`, `lib/catalog.test.js`, `App.test.jsx` | Tests |
+| 12.33–12.39 | `frontend/public/images/products/*.jpg` | Seven photos |
+| 12.40 | `docs/IMAGE_CREDITS.md` | Their sources and licenses |
+
+Modified:
+- **Backend.** `demo-products.sql` (04.05: seven `image_url` paths). `ProductCreateRequest` and
+  `ProductUpdateRequest` (05.02, 05.03: `imageUrl` may be `/images/products/…`). `ProductControllerTest` (05.13: a
+  test of that rule).
+- **Docs.** `docs/DECISIONS.md` (D-050 to D-053; the open questions); `docs/PROJECT_PLAN.md` §4 (re-checked
+  versions); `docs/REQUEST_FLOWS.md` (SEARCH-01 and SEARCH-07 made real); README (status, prerequisites, ports,
+  quick start, tests, docs map); FILE_GUIDE; PROGRESS; LEARNING_LOG.
+
+**Relevant syntax**
+- *React*:
+  - components are functions that return JSX; props come in as one object; `useState`, `useEffect` (with a cleanup
+    function), `useRef`, `useMemo`, `useCallback`;
+  - the "adjust state when a prop changes" pattern, as in `SearchBox`: compare with a stored value during rendering;
+  - `key` on list items.
+- *Browser APIs*:
+  - the address bar: `URLSearchParams`, `history.pushState` / `replaceState`, the `popstate` event;
+  - requests: `fetch` with an `AbortController` signal;
+  - formatting: `Intl.NumberFormat('en-IN', {style: 'currency', currency: 'INR', trailingZeroDisplay: 'stripIfInteger'})`;
+  - elements: `<dialog>` with `showModal()`, `<search>`, `<details>`.
+- *CSS*:
+  - custom properties (`var(--color-text)`), `@media (min-width: 48rem)`, `prefers-reduced-motion`;
+  - `aspect-ratio`, `object-fit: contain`, `scroll-margin-top`;
+  - attribute selectors such as `[aria-pressed="true"]`.
+- *Testing*:
+  - Vitest with jsdom;
+  - Testing Library's `render`, `screen.findByRole` / `getByRole`, `userEvent.setup()`;
+  - `vi.fn()` and `vi.stubGlobal('fetch', …)`.
+
+**Commands we ran** (PowerShell)
+
+| Command | Purpose |
+|---|---|
+| `curl.exe -s https://nodejs.org/dist/index.json`; `npm view <package> version` | Re-check the version baseline |
+| `npm create vite` with `create-vite` 9.3.3, the `react` template, in a scratch folder | Read the current template before writing the files by hand |
+| The Wikimedia Commons API (`action=query`, `prop=imageinfo`, `extmetadata`), contact sheets drawn with .NET's `System.Drawing` | Find free-licensed photos and look at them |
+| `npm install`, `npm run lint`, `npm test`, `npm run build` | Install, lint, test, build |
+| `.\mvnw.cmd -B -ntp clean verify` | The backend with the widened `imageUrl` rule |
+| `.\scripts\dev-services.ps1 reset -Force`, `up`; `java -jar … --spring.profiles.active=dev`; `npm run dev` | The real stack with the new demo data |
+| A browser script (Playwright API, headless Chromium) at 375, 768, and 1440 pixels | Layout, behaviour, and screenshots in a real browser |
+
+**Expected behavior.**
+- Typing sends one request after the pause, and Back and Forward walk through searches.
+- A filter change returns to page 1.
+- A bad price range is explained, not sent.
+- Errors read as sentences.
+- Nothing scrolls sideways on a phone.
+
+**Actual checks** (2026-10-30)
+
+| Check | Result |
+|---|---|
+| Version re-check | Node 26 LTS since 2026-10-28; Vite 8.3.5 (a patch); the template lints with oxlint; the rest unchanged |
+| `npm install` | 100 packages, 0 vulnerabilities reported |
+| `npm run lint` / `npm test` / `npm run build` | Clean (after one fix, below) / 17 passed / 239 KB JavaScript (75 KB gzipped), 12.7 KB CSS |
+| Backend `clean verify` | 108 tests, 0 failures |
+| Real stack | Flyway built the schema from scratch; 24 demo products loaded; the page, `/api` through the proxy, and a photo answered 200 |
+| Browser, 375 / 768 / 1440 px | No sideways scrolling; 2 / 3 / 3 columns; sidebar only at 1440, the Filters button below that; every photo on page 1 loaded (4 of 12; 8 placeholders) |
+| Browser, behaviour | "linen": exactly one request, address `?q=linen`, 3 products. Back restored the search and the category. Sort high to low: ₹6,990, ₹6,490, … Page 2: "Showing 13–24 of 24 products", scrolled to the results below the header. Reversed prices: the message shown, no request sent. Invalid address: "Maximum price: must be greater than or equal to minPrice." `?q=zzzz` and `?page=9`: their own empty states |
+| Browser, drawer and keyboard | The drawer opened as a modal with focus inside; "Show 22 products"; Escape closed it and focus returned to "Filters (1)"; the first Tab reached "Skip to products" |
+| Console | The only error was the 400 the invalid-address check asked for. The aborted requests are React StrictMode's repeated first request in development, plus older requests cancelled on purpose |
+
+Mistakes and findings on the way:
+- **Photo sourcing.** Openverse timed out, and Commons mostly returned museum pieces, people, and other brands'
+  products. Seven photos passed the rules; the rest show a designed placeholder (D-051).
+- **The API rejected the data it served.** The demo rows needed `/images/products/…` paths, which `imageUrl` refused,
+  so the rule was widened and tested (D-052).
+- **Lint.** It asked for the `<search>` element instead of `role="search"`.
+- **The browser check found a real gap.** While new results loaded, an old empty message stayed fully visible next to
+  the new state. The busy state moved from the grid to the whole results area.
+- **Two visual refinements:**
+  - the hero line no longer repeats the header's tagline;
+  - placeholders now share the photos' mat colour.
+- **PowerShell 5.1 again:**
+  - a script without a byte-order mark broke a non-ASCII file name;
+  - `ConvertFrom-Json` returns an array as one object;
+  - `Cli` is an alias of `Clear-Item`.
+
+  They affected only scratch tools, and each was fixed there.
+
+**How the pieces connect**
+
+```text
+address bar ?q=linen&page=2 ──► useUrlState (readSearchState) ──► search state
+   typing ─► SearchBox (300 ms pause) ─┐   click ─► CategoryTabs / FilterPanel / ResultsToolbar / Pagination
+                                       └──► update(changes) ─► pushState or replaceState ─► new state (page 1 unless paging)
+search state ─► toApiQuery ─► useProductSearch: abort the old request, fetch /api/v1/products?… ─► Vite proxy ─► Spring Boot
+answer ─► App: ErrorState | GridSkeleton | EmptyState | ProductGrid (ProductCard: photo on a mat or monogram) + Pagination
+```

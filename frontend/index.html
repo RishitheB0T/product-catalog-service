@@ -1,0 +1,24 @@
+<!doctype html>
+<!--
+BUILD FLOW 12.05 — frontend/index.html
+First introduced: Phase 12
+Purpose: The one HTML page of the storefront. React renders everything inside <div id="root">.
+Depends on: src/main.jsx (12.07), public/favicon.svg (12.06).
+Used by: Vite, which serves it in development and turns it into dist/index.html when building.
+Runtime role: The first file the browser loads; everything else follows from the script tag.
+-->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="FORM — The Everyday Edit: clothing, footwear, bags, and things for the home, kitchen, and desk." />
+    <meta name="theme-color" content="#f6f3ee" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>FORM — The Everyday Edit</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <noscript>This storefront needs JavaScript to show the catalog.</noscript>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

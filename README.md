@@ -14,13 +14,19 @@ A product catalog built from an empty folder in documented phases, with every fi
 **Spring Boot** REST API over **MySQL**, **Redis** caching for product details, and a **React** storefront that
 uses the real API.
 
-> **Status: Phase 11 of 16 complete.** The product API searches the catalog (filters, sorting, pagination) and reads,
-> creates, updates, and deletes single products, with validation, optimistic locking, and one error format; production
-> settings are read-only. Search queries were measured on 100,000 products and indexed from the measured plans.
-> Product details are cached in Redis, cleared after every committed write, with MySQL as the fallback when Redis
-> fails. 107 tests cover it, including full-stack tests over real HTTP and a Redis outage. Load tests with k6 measured
-> the whole requests: the cache serves product details about 3.3 times faster than MySQL alone. This README always
-> describes what actually works; anything not built yet is labeled *planned*.
+> **Status: Phase 12 of 16 complete.**
+> - **The API** searches the catalog (filters, sorting, pagination) and reads, creates, updates, and deletes single
+>   products, with validation, optimistic locking, and one error format. Production settings are read-only.
+> - **Performance:** search queries were measured on 100,000 products and indexed from the measured plans. Product
+>   details are cached in Redis, cleared after every committed write, with MySQL as the fallback when Redis fails.
+>   Load tests with k6 measured whole requests: the cache serves product details about 3.3 times faster than MySQL
+>   alone.
+> - **The storefront** (React) searches the real API, with filters, chips, sorting, pagination, and the search kept
+>   in the address bar.
+> - **Tests:** 108 backend tests, including full-stack tests over real HTTP and a Redis outage, and 17 frontend
+>   tests.
+>
+> This README always describes what actually works; anything not built yet is labeled *planned*.
 
 <!-- BUILD FLOW 01.04.01 — What works today -->
 ## What works today
@@ -38,7 +44,8 @@ uses the real API.
 | Redis product-detail cache: cache-aside reads, versioned keys, JSON, 60-second TTL, metrics | Done (Phase 09) |
 | Cache eviction after committed writes, 200 ms Redis timeouts with MySQL fallback; cache switched on | Done (Phase 10) |
 | Reproducible k6 benchmarks: cache off, cold, and warm; search without and with indexes; raw results and report | Done (Phase 11) |
-| React storefront and local admin | Planned (Phases 12–13) |
+| React storefront: search, categories, filters (sidebar or mobile drawer), chips, sorting, pagination, the search in the address bar, INR prices, licensed photos | Done (Phase 12) |
+| Product detail view, local admin, accessibility polish | Planned (Phase 13) |
 | Production containers and CI | Planned (Phase 14) |
 | AWS EC2 deployment | Planned (Phase 15; needs AWS access and approval) |
 
@@ -100,9 +107,9 @@ GitHub Actions. The exact versions, verified against official sources on 2026-10
 | JDK 21 | Compiles and runs the backend | Any JDK 21 distribution works |
 | Docker Desktop (WSL 2 engine) | Runs MySQL and Redis locally, builds images, and powers Testcontainers | Must be running |
 | Git for Windows | Version control. Its Git Credential Manager handles GitHub sign-in in the browser | — |
-| Node.js and npm | Frontend tooling only: Vite dev server, tests, production build | Node 24 LTS or newer |
+| Node.js and npm | Frontend tooling only: Vite dev server, tests, production build | Node 26 LTS recommended (Node 24 LTS also works) |
 | Maven | **Not required.** The Maven Wrapper (`mvnw.cmd`) downloads the pinned version | — |
-| k6 | Benchmarks | Planned to run from its Docker image, so nothing to install |
+| k6 | Benchmarks | Runs from its Docker image, so nothing to install |
 
 <!-- BUILD FLOW 01.04.08 — Ports (added in Phase 03) -->
 ## Ports
@@ -118,7 +125,7 @@ Local services listen on `127.0.0.1` only, so other devices on the network canno
 | Backend, `bench` profile (100,000-product measurement database) | `127.0.0.1:24083` | — | Phase 08 |
 | MySQL 8.4 | `127.0.0.1:24306` | 3306 | Phase 03 |
 | Redis 8.10 | `127.0.0.1:24379` | 6379 | Phase 03 |
-| Vite dev server | 24173 (planned) | — | Phase 12 |
+| Vite dev server, and `vite preview` of the production build (never both at once) | `127.0.0.1:24173` | — | Phase 12 |
 | Production-style stack through Nginx | 24080 (planned) | 80 | Phase 14 |
 
 <!-- BUILD FLOW 01.04.06 — Running, testing, evidence, deployment -->
@@ -164,6 +171,25 @@ the cache is in [`docs/CACHING.md`](docs/CACHING.md).
 ```powershell
 "SELECT sku, name, category, price, stock_quantity FROM product LIMIT 5;" | docker compose --env-file infra\.env -f infra\compose.dev.yaml exec -T mysql sh -c 'MYSQL_PWD=$MYSQL_PASSWORD mysql -u $MYSQL_USER $MYSQL_DATABASE --table'
 ```
+
+**5. Run the storefront** in another terminal (needs Node.js; the backend from step 2 must be running):
+
+```powershell
+cd frontend
+npm ci
+npm run dev
+```
+
+Open http://127.0.0.1:24173/. `npm ci` installs the exact versions recorded in `package-lock.json` (run it again
+whenever that file changes). The Vite server forwards every `/api` request to the backend on port 24081, so the page
+and the API share one address. Stop it with Ctrl+C.
+
+- **Demo data from before Phase 12 has no photos.** The demo catalog loads only into an empty table. To reload it
+  with photos, run `.\scripts\dev-services.ps1 reset -Force` and then `.\scripts\dev-services.ps1 up`, and start the
+  backend again. This deletes all local data, including the benchmark database, which `run-benchmarks.ps1`
+  recreates.
+- **Frontend checks:** `npm run lint`, `npm test`, and `npm run build`. `npm run preview` serves the production
+  build on the same port.
 
 **Production-style run of the packaged jar.** The `prod` profile contains no database or Redis settings on purpose:
 a server supplies them as environment variables, which Spring Boot maps onto its properties (`SPRING_DATASOURCE_URL`
@@ -286,7 +312,7 @@ cd backend
 .\mvnw.cmd verify
 ```
 
-107 tests in fourteen classes. The first two start the whole application on a random port and call it over real HTTP,
+108 tests in fourteen classes. The first two start the whole application on a random port and call it over real HTTP,
 exactly as a client would:
 - `ProductApiIntegrationTest` (15): a product from creation to deletion, the exact JSON shape, fields a client may not
   set, every error type (400, 404, 405, 409, 415), a rollback seen through the API, Unicode text, ten simultaneous
@@ -294,9 +320,9 @@ exactly as a client would:
   409s), and the read-only `prod` profile.
 - `ProductSearchApiIntegrationTest` (6): filters from a real query string, the page envelope, ties across pages,
   percent-encoded search text, and the binding behavior documented above.
-- `ProductControllerTest` (22), a web-layer test with the service replaced by a Mockito test double: status codes,
-  JSON shapes, validation messages, every Problem Details type, and the search parameters (defaults, binding, and
-  every kind of invalid value).
+- `ProductControllerTest` (23), a web-layer test with the service replaced by a Mockito test double: status codes,
+  JSON shapes, validation messages, every Problem Details type, the search parameters (defaults, binding, and every
+  kind of invalid value), and which image addresses are accepted.
 - `ProductSearchTest` (13) searches real MySQL: each filter and their combination, case- and accent-insensitive names,
   `%` and `_` matched literally, inclusive price bounds, every sort with its `id` tie-breaker, and pages that never
   overlap or skip a product.
@@ -318,6 +344,28 @@ exactly as a client would:
 - `BenchmarkProductGeneratorTest` (4) checks that the benchmark data is reproducible (a pinned fingerprint for all
   100,000 products), valid by the API's own rules, and shaped like a real catalog; `BenchmarkDataSeederTest` (2)
   checks that it loads only with the `bench` profile, only into an empty table, and only once.
+
+**Frontend** (no Docker or backend needed; `fetch` is replaced in the tests):
+
+```powershell
+cd frontend
+npm test
+```
+
+17 tests in two files:
+- **`App.test.jsx` (8)** renders the whole catalog page against a fake API. It covers:
+  - the results and their count;
+  - a search restored from the address bar;
+  - typing that sends one request after the pause;
+  - a stale request cancelled when the search changes;
+  - the return to page 1 when a filter changes;
+  - removing chips and clearing all filters;
+  - an API error explained in plain words, with "Try again";
+  - the placeholder when a photo fails to load.
+- **`catalog.test.js` (9)** checks the pure rules: reading and writing the address bar, the API query, price
+  checks, page numbers, and rupee formatting.
+
+The pages were also checked in a real browser at 375, 768, and 1440 pixels wide (`docs/BUILD_GUIDE.md`, Phase 12).
 
 ## Performance evidence
 
@@ -373,4 +421,5 @@ instance, region, and cost.
 | [`docs/QUERY_OPTIMIZATION.md`](docs/QUERY_OPTIMIZATION.md) | How search was measured and indexed, with the evidence |
 | [`docs/CACHING.md`](docs/CACHING.md) | The Redis product-detail cache: keys, TTL, flows, failures, limits |
 | [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md) | Load tests with k6: the cache and the indexes measured end to end, and how far the numbers go |
+| [`docs/IMAGE_CREDITS.md`](docs/IMAGE_CREDITS.md) | Where each product photo comes from, its license, and how photos were chosen |
 | [`docs/LEARNING_LOG.md`](docs/LEARNING_LOG.md) | Concepts and exercises for each phase |

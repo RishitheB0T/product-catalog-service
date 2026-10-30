@@ -52,8 +52,10 @@ public record ProductUpdateRequest(
         @PositiveOrZero
         Integer stockQuantity,
 
+        // The same rule as in ProductCreateRequest: a web address or one of the storefront's own photos.
         @Size(max = 500)
-        @Pattern(regexp = "^https?://\\S+$", message = "must be an http or https URL")
+        @Pattern(regexp = "^(https?://\\S+|/images/products/[a-z0-9-]+\\.(jpg|png|webp))$",
+                message = "must be an http or https URL, or a path under /images/products/")
         String imageUrl,
 
         @NotNull

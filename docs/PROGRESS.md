@@ -17,11 +17,11 @@ Runtime role: None. Documentation only.
 
 | Item | Value |
 |---|---|
-| Current phase | **11 — complete** |
-| Next phase | 12 — frontend catalog: the React + Vite storefront "FORM" against the real API |
+| Current phase | **12 — complete** |
+| Next phase | 13 — product detail view, local admin (create, edit, delete), accessibility polish |
 | Branch | `main`, tracking `origin/main` |
 | Repository | https://github.com/RishitheB0T/product-catalog-service (public) |
-| Last updated | 2026-10-30 |
+| Last updated | 2026-10-31 |
 
 **Commits so far** (each commit records the hash of the one before it, because a commit cannot contain its own hash)
 
@@ -38,7 +38,8 @@ Runtime role: None. Documentation only.
 | Phase 08 | `837a972` | `perf(database): optimize measured catalog search queries` | Pushed and verified |
 | Phase 09 | `bc82587` | `feat(cache): cache product details in Redis` | Pushed and verified |
 | Phase 10 | `2abde5e` | `feat(cache): handle committed writes and Redis failures` | Pushed and verified |
-| Phase 11 | Recorded at the start of Phase 12 | `perf: add reproducible catalog benchmarks and evidence` | Pushed and verified when committed |
+| Phase 11 | `d64f10f` | `perf: add reproducible catalog benchmarks and evidence` | Pushed and verified |
+| Phase 12 | Recorded at the start of Phase 13 | `feat(frontend): build the storefront catalog` | Pushed and verified when committed |
 
 <!-- BUILD FLOW 01.10.02 — Checks run in Phase 01 -->
 ## Checks run in Phase 01
@@ -229,6 +230,31 @@ All ran on 2026-10-29 and 2026-10-30. Full details are in `BUILD_GUIDE.md`, Phas
 - Benchmarks need mains power and an open lid. The script keeps the computer awake, but a closed lid still sends it
   into standby (and the run is then discarded).
 
+<!-- BUILD FLOW 01.10.16 — Checks run in Phase 12 -->
+## Checks run in Phase 12
+
+All ran on 2026-10-30. Full details are in `BUILD_GUIDE.md`, Phase 12.
+- Version re-check: Node 26 LTS since 2026-10-28; Vite 8.3.5 (a patch); the template lints with oxlint (D-053).
+- `npm install` (100 packages, 0 vulnerabilities reported); `npm run lint` clean; `npm test` 17 passed; `npm run
+  build` succeeded.
+- Backend `.\mvnw.cmd clean verify`: 108 tests, 0 failures (one new test for the widened `imageUrl` rule).
+- Real stack (dev services reset, the backend with `dev`, `npm run dev`): 24 demo products with seven photo paths;
+  the page, `/api` through the Vite proxy, and a photo all answered 200.
+- Headless browser at 375, 768, and 1440 pixels:
+  - layout: no sideways scrolling; 2 / 3 / 3 columns; the sidebar or the drawer as designed;
+  - photos: every photo on page 1 loaded;
+  - behaviour: one request per typed search; Back restored the search; the page reset to 1; reversed prices were
+    explained and not sent; readable API errors; the empty states; the drawer as a modal with Escape and focus
+    return; the skip link first.
+
+**Carry-forward items**
+- Only seven of 24 demo products have photos, and they don't share a style. Better photos (Openverse when it
+  responds, or photos the developer provides) can replace placeholders under the rules in `docs/IMAGE_CREDITS.md`.
+- Routing is decided in Phase 13, when the detail and admin views arrive (D-050).
+- The development machine runs Node 26.8.1. Updating to the 26 LTS release (26.13.0) is recommended before Phase 14
+  builds images with it.
+- The local `catalog_bench` database was deleted by the dev reset; `scripts/run-benchmarks.ps1` recreates it.
+
 <!-- BUILD FLOW 01.10.03 — Environment -->
 ## Environment (inspected 2026-10-20)
 
@@ -240,7 +266,7 @@ All ran on 2026-10-29 and 2026-10-30. Full details are in `BUILD_GUIDE.md`, Phas
 | GitHub CLI | 2.102.0, installed with winget on 2026-10-20 and signed in as `RishitheB0T` |
 | JDK | Microsoft Build of OpenJDK 21.0.12.1; `JAVA_HOME` set |
 | Docker | Engine 29.6.2 (WSL 2 backend) and Compose v5.3.1; the engine was running |
-| Node.js / npm | 26.8.1 ("Current"; becomes LTS on 2026-10-28) / 11.19.0 |
+| Node.js / npm | 26.8.1 / 11.19.0 (Node 26 became LTS on 2026-10-28; the LTS release is 26.13.0, re-checked in Phase 12) |
 | Maven | 3.10.0 through the wrapper (downloaded to the user's `.m2` folder on 2026-10-20; checksum-verified) |
 | Ports | This project uses the 24xxx block on `127.0.0.1` (README "Ports"). At inspection, 8080, 5432, and 9090 were in use by other programs |
 | Local containers | `product-catalog-dev-mysql-1` and `product-catalog-dev-redis-1`; together about 430 MiB of memory while running |
@@ -257,20 +283,18 @@ All ran on 2026-10-29 and 2026-10-30. Full details are in `BUILD_GUIDE.md`, Phas
 | GitHub repository and sign-in | — | Done on 2026-10-20: public repository created with the GitHub CLI; pushes verified |
 | `workflow` token scope for pushing CI files | Phase 14 | Pending. The current tokens are not known to include `workflow`, which GitHub requires for pushing files under `.github/workflows/`. Plan: `gh auth refresh -s workflow` when needed |
 | AWS account access and approval of instance, region, and cost | Phase 15 | Pending |
-| Anything blocking Phase 12 | — | None. Re-check the Node.js LTS line first: Node 26 was scheduled to become LTS on 2026-10-28, and this machine has 26.8.1 |
+| Anything blocking Phase 13 | — | None |
 
 <!-- BUILD FLOW 01.10.05 — Next action -->
 ## Next action
 
-Next: Phase 12 (plan §14, "Frontend catalog").
-1. Record Phase 11's commit hash in the commits table above.
-2. Re-check the version baseline for the frontend (plan §4): the Node.js LTS line, React, Vite, Vitest, and the
-   Testing Library packages. Record any change.
-3. Scaffold `frontend/` with Vite and React (JavaScript); the Vite dev server on `127.0.0.1:24173`, proxying `/api` to
-   the backend on 24081.
-4. The storefront: header, hero, search, categories, responsive grid, filters (a desktop panel and a mobile drawer),
-   chips with clear-all, sorting, pagination, and counts; debounced search with `AbortController`; state in the URL;
-   INR formatting; skeleton, empty, and error states; image fallbacks with documented licenses.
-5. Checks: lint, tests, a production build, and browser checks at about 375 px, tablet, and 1440 px (a manual
-   checklist marked unverified if no automation is available).
-6. Commit, push, and verify on GitHub.
+Next: Phase 13 (plan §14, "Detail, admin, accessibility, polish").
+1. Record Phase 12's commit hash in the commits table above.
+2. Decide routing for the detail and admin views (React Router or a small hand-written router; D-050).
+3. The product detail view: image, description, price, stock, and SKU, from `GET /api/v1/products/{id}`.
+4. The local admin: create, edit, and delete with validation messages from the API, version conflicts (409),
+   delete confirmation in an accessible dialog, and success feedback. It respects the server's write switch, and the
+   server still enforces it.
+5. Accessibility: keyboard paths, visible focus, labeled inputs, dialogs, contrast, reduced motion.
+6. Checks: frontend tests, and browser checks of CRUD, keyboard paths, and mobile layouts.
+7. Commit, push, and verify on GitHub.

@@ -569,13 +569,76 @@ history, with a pointer to its replacement).
   connections open removes the cost of a reconnect every 100 requests from every scenario alike. It doesn't change how
   the scenarios compare, but absolute numbers are slightly better than with Tomcat's default.
 
+## D-050 · The storefront's shape: URL state, plain hooks, no router yet — Accepted (Phase 12)
+
+- **Decision:** React 19 with Vite, in plain JavaScript.
+  - **State:** the search lives in the address bar's query string, read and written by a small hook (`useUrlState`).
+  - **Data:** one hook fetches the results (`useProductSearch`), and one module holds all calls to the API.
+  - **Styling:** plain CSS with design tokens, and system font stacks.
+  - **Lint:** oxlint, as the current Vite template ships it.
+  - **Versions:** exact in `package.json`, plus the lockfile.
+  - **No router:** Phase 12 has a single page.
+- **Why:**
+  - Search state in the URL makes refresh, sharing, and Back/Forward work with no extra code.
+  - A router, a state library, or a data-fetching library would add dependencies for what about 60 lines of hooks do
+    here.
+  - System fonts mean no web-font download and no third-party request.
+- **Alternatives:**
+  - React Router, which Phase 13 decides with the product detail and admin views.
+  - TanStack Query, for caching and retries.
+  - A CSS framework.
+  - ESLint, which the Vite template no longer ships.
+- **Limits:** results are not cached in the browser: going back to a search fetches it again. Each page is a fresh
+  request, because the API orders and counts by itself.
+
+## D-051 · Product photos: free-licensed, self-hosted, credited — Accepted (Phase 12)
+
+- **Decision:** seven demo products use photos from Wikimedia Commons, and the other seventeen show a designed
+  placeholder.
+  - **The rules:** a free license (CC0, public domain, CC BY, CC BY-SA), no visible brand, matching the product.
+  - **Storage:** resized copies in `frontend/public/images/products/`, referenced by path from the demo data.
+  - **Credits:** in the footer and in `docs/IMAGE_CREDITS.md`.
+- **Why:**
+  - Openverse did not respond, and most Commons results were museum pieces, people, or other brands' products. A
+    fictional shop must not present another company's logo as its own.
+  - Hosting the files ourselves avoids hotlinking, a third-party request on every page, and broken images if a remote
+    file moves.
+  - Showing each photo whole on a shared mat keeps a mixed set looking consistent.
+- **Alternatives:** photos supplied by the developer; original illustrations; remote URLs; placeholders only.
+- **Limits:** only seven photos, and they don't share a style. CC BY and CC BY-SA require the credits to stay
+  visible.
+
+## D-052 · `imageUrl` may be a path to the storefront's own photos — Accepted (Phase 12)
+
+- **Decision:** the create and update requests accept an `imageUrl` that is either an http(s) URL or
+  `/images/products/<name>.(jpg|png|webp)`, where the name has only lower-case letters, digits, and hyphens.
+- **Why:** the demo data now stores such paths. If the write API rejected them, the admin form of Phase 13 could not
+  save a demo product unchanged. The narrow pattern still blocks `javascript:` and `data:` URLs, and paths that climb
+  out of the folder.
+- **Alternatives:** absolute URLs in the demo data, which tie it to one host and port; or leaving the API stricter
+  than the data it serves.
+- **Limits:** the API does not check that the file exists; a wrong path shows the placeholder.
+
+## D-053 · Frontend versions re-checked — Accepted (Phase 12)
+
+- **Decision:** on 2026-10-30 the frontend baseline was checked again against the npm registry and the nodejs.org
+  release index.
+  - Vite moved from 8.3.4 to the patch release 8.3.5, and `create-vite` from 9.3.1 to 9.3.3; both are taken.
+  - The Vite template now lints with oxlint (1.90.0) instead of ESLint (D-050).
+  - Node 26 became the active LTS line on 2026-10-28, so builds and CI (Phase 14) target Node 26 LTS (26.13.0).
+  - Everything else matched the baseline.
+- **Why:** the plan's rule (§4): re-check each version in the phase that pins it, and take newer patch releases.
+- **Alternatives:** Node 24 LTS, which is supported for longer as a maintenance line but is the older one.
+- **Limits:** the development machine runs Node 26.8.1. That is the same major line, but older than the LTS
+  release; updating it is recommended, not required.
+
 <!-- BUILD FLOW 01.08.03 — Open questions -->
 ## Open questions (each is decided in its phase)
 
 | Question | Phase |
 |---|---|
-| Routing: React Router or a small hand-written router | 12 |
-| Product images: self-hosted licensed files or licensed remote URLs | 12 |
+| Routing: React Router or a small hand-written router (Phase 12 needed none, D-050) | 13 |
+| ~~Product images: self-hosted licensed files or licensed remote URLs~~ Decided: self-hosted (D-051) | 12 |
 | Nginx image: official or unprivileged variant | 14 |
 | How EC2 receives the exact same image: a registry, or `docker save` and `docker load` | 14–15 |
 | EC2 instance type, region, and cost (approved before anything is launched) | 15 |

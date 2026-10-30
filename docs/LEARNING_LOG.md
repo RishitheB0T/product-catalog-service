@@ -442,3 +442,44 @@ Concepts in the order we met them, each with small practice exercises.
 
 Exercises 2 and 6 overwrite `benchmarks/results/`. Afterwards, `git restore benchmarks/results` brings back the
 published files.
+
+<!-- BUILD FLOW 01.09.13 — Phase 12 -->
+## Phase 12 — The storefront catalog
+
+**Concepts**
+- **Components, props, and state.** A component is a function from props and state to markup. React re-renders it
+  when either changes; nothing is changed by hand in the DOM.
+- **One source of truth.** The search lives in the address bar. The API query, the count, and the chips are
+  computed from it on every render instead of being copied into more state that could drift.
+- **The URL as state.** `pushState` adds a history entry and `replaceState` overwrites one; `popstate` reports Back
+  and Forward. A shared or refreshed link shows the same results.
+- **Effects and cleanup.** An effect runs after rendering. Its cleanup runs before the next run and on unmount. That
+  is where a request is aborted and a listener removed.
+- **Race conditions in the browser.** Without cancellation, a slow old answer can arrive after a newer one and
+  overwrite it. `AbortController` cancels the old request, so the last search always wins.
+- **Debouncing.** Wait for a pause before acting, so typing "linen" sends one request, not five.
+- **Derived loading.** Comparing the query a result answers with the current query tells whether a newer request is
+  still loading. No separate "loading" flag can get out of step.
+- **Errors as sentences.** Problem Details carry machine-readable fields. The UI turns them into messages a person
+  understands, and always offers a way forward.
+- **Accessibility basics:**
+  - labels for every field, `fieldset` and `legend` for groups;
+  - `aria-pressed`, `aria-current`, `aria-live`, and `aria-busy`;
+  - a skip link, and native `<dialog>`, `<search>`, and `<details>`.
+- **Responsive, mobile-first CSS.** Base rules for phones, then `min-width` media queries for wider screens. Design
+  tokens keep colours and spacing consistent.
+- **Licensing.** "Free to use" means a specific license with specific duties (credit, share-alike). Record the source
+  and license of every asset, and never present another brand's product as your own.
+
+**Exercises**
+1. Type quickly in the search box with the browser's network tab open. How many requests are sent? Change the pause
+   in `SearchBox` to 0 and compare.
+2. Remove the cleanup (`return () => controller.abort()`) from `useProductSearch`. Throttle the network in the
+   browser's developer tools, click two categories quickly, and explain what can go wrong.
+3. Why does `update` return to page 1 for every change except a page change? Find a case where keeping the page
+   would show something wrong.
+4. In `SearchBox`, why does the comparison with `sent` happen during rendering instead of in an effect? What would
+   an effect show on screen for a moment?
+5. Open the filter drawer with the keyboard only. Where is focus, how do you close it, and where does focus go
+   afterwards? Which browser feature does that work?
+6. Add a photo for one more product by following `docs/IMAGE_CREDITS.md`. Which licenses would you reject, and why?

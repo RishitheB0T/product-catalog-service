@@ -153,6 +153,29 @@ class ProductControllerTest {
                         .value("must be one of [APPAREL, FOOTWEAR, BAGS, HOME, KITCHEN, STATIONERY]"));
     }
 
+    // Since Phase 12 the demo photos are stored as paths on the storefront's own site, so the rule accepts those too,
+    // and nothing that could escape the folder or run as a script.
+    @Test
+    void imageUrlIsAWebAddressOrOneOfTheStorefrontsPhotos() throws Exception {
+        given(service.createProduct(any())).willReturn(product(43, 0));
+        for (String accepted : List.of("https://images.example/linen.jpg", "/images/products/frm-app-003.jpg")) {
+            mvc.perform(post("/api/v1/products").contentType(MediaType.APPLICATION_JSON).content(withImage(accepted)))
+                    .andExpect(status().isCreated());
+        }
+        for (String rejected : List.of("javascript:alert(1)", "/images/products/../secret.jpg", "/etc/passwd.jpg",
+                "images/products/frm-app-003.jpg")) {
+            mvc.perform(post("/api/v1/products").contentType(MediaType.APPLICATION_JSON).content(withImage(rejected)))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.errors[0].field").value("imageUrl"))
+                    .andExpect(jsonPath("$.errors[0].message")
+                            .value("must be an http or https URL, or a path under /images/products/"));
+        }
+    }
+
+    private static String withImage(String imageUrl) {
+        return VALID_PRODUCT.replace("\"imageUrl\": null", "\"imageUrl\": \"" + imageUrl + "\"");
+    }
+
     @Test
     void brokenJsonIsA400() throws Exception {
         mvc.perform(post("/api/v1/products").contentType(MediaType.APPLICATION_JSON).content("{\"sku\": "))

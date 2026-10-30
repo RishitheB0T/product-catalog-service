@@ -55,8 +55,11 @@ public record ProductCreateRequest(
         @PositiveOrZero
         Integer stockQuantity,
 
-        // Optional. Only http and https URLs: schemes such as javascript: or data: could be abused when a page renders them.
+        // Optional. An http or https URL, or (since Phase 12) a path to one of the storefront's own photos, such as
+        // /images/products/frm-app-003.jpg. Nothing else: schemes such as javascript: or data: could be abused when a
+        // page renders them, and the path allows no dots or slashes in the name, so it cannot climb out of the folder.
         @Size(max = 500)
-        @Pattern(regexp = "^https?://\\S+$", message = "must be an http or https URL")
+        @Pattern(regexp = "^(https?://\\S+|/images/products/[a-z0-9-]+\\.(jpg|png|webp))$",
+                message = "must be an http or https URL, or a path under /images/products/")
         String imageUrl) {
 }
