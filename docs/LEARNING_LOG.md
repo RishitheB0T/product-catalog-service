@@ -400,3 +400,45 @@ Concepts in the order we met them, each with small practice exercises.
    impossible.
 5. With the dev stack running, stop Redis (`docker compose … stop redis`), update a product, start Redis again, and
    read the product. Is it outdated? Why not, here, and when would it be?
+
+<!-- BUILD FLOW 01.09.12 — Phase 11 -->
+## Phase 11 — Benchmarks and evidence
+
+**Concepts**
+- **Measure the whole request.** A query that takes 0.1 ms inside MySQL can still be a 30 ms request. The request
+  also includes the network, the JVM, JSON, a second query (the count), and waiting for a CPU.
+- **Closed and open models.** In a closed model, a fixed number of users each send the next request when the last
+  one answers. In an open model, requests arrive at a fixed rate, however slow the answers are. A closed model
+  sends fewer requests when the server slows down, so it can hide how bad latency would get under real arrivals.
+  This effect is called *coordinated omission*.
+- **Little's law.** Users = throughput × time per request. In a closed model, higher throughput and lower latency are
+  the same result, and the law is a quick check that the numbers are consistent.
+- **Warm-up, fresh start, several trials.** Throw away the first seconds (JIT compilation, empty buffer pools), and
+  report the median with the range rather than one lucky run.
+- **Percentiles.** The median shows a typical request and p95 the slow tail; a mean hides both.
+- **Cold and warm caches.** A hit skips the database; a miss costs more than no cache at all. The hit ratio and the
+  number of reads per TTL decide whether the cache pays off.
+- **A speed-up only helps as much as the share it speeds up.** The indexes made page queries up to 483 times faster,
+  but the counts remained, so whole searches got only 3–6 times faster (Amdahl's law).
+- **Valid before fast.** Decide whether a run counts by facts about the run itself, never by its results. Examples are
+  its real length, failed connections, sleep, and whether a cold pass was really cold. Record runs that were thrown
+  away, and why.
+- **A silent failure can look like a great result.** A cache "warmed" by a failed delete made the cold numbers look
+  excellent. Checking the counters, not just the timings, caught it.
+- **The load generator is part of the system.** On one laptop, k6, Docker's network forwarding, and the server
+  compete for the same CPU. Here a property of that path, connection stalls, nearly ended up in the numbers.
+
+**Exercises**
+1. From the report, use Little's law to predict the cache-off throughput with 20 users if latency stayed the same.
+   Then explain why it wouldn't stay the same on this laptop.
+2. Run `.\scripts\run-benchmarks.ps1 -SkipIndexComparison -Trials 1 -Vus 1` and compare the medians with the
+   10-user results. How much of the 10-user latency was waiting?
+3. Using your own run's medians, compute how many reads per minute a product needs before the cache pays off.
+4. Why did all 1,162 warm-cache misses fall in trial 2? Change the protocol (not the TTL) so that no warm trial sees
+   an expiry.
+5. Which single change would make the search mix fastest next, and how would you measure it before and after?
+6. Remove `--server.tomcat.max-keep-alive-requests=-1` from the script on a scratch branch and run it. Which check
+   reacts, if any, and what does the report say?
+
+Exercises 2 and 6 overwrite `benchmarks/results/`. Afterwards, `git restore benchmarks/results` brings back the
+published files.

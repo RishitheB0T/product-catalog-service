@@ -13,7 +13,9 @@ Runtime role: None. Documentation only.
 # Caching — product details in Redis
 
 > **Status (Phase 10):** on by default. Reads use cache-aside; every committed create, update, and delete removes the
-> product's key; Redis failures fall back to MySQL within a fraction of a second. Phase 11 measures the effect.
+> product's key; Redis failures fall back to MySQL within a fraction of a second. Measured under load in Phase 11
+> ([`PERFORMANCE.md`](PERFORMANCE.md)): about 3.3 times the throughput of the cache-off read when warm, while a miss
+> costs about twice a cache-off read.
 
 <!-- BUILD FLOW 09.05.01 — What is cached -->
 ## What is cached, and what is not

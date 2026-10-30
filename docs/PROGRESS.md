@@ -17,11 +17,11 @@ Runtime role: None. Documentation only.
 
 | Item | Value |
 |---|---|
-| Current phase | **10 — complete** |
-| Next phase | 11 — benchmarks and evidence: k6, cache on and off on the same endpoint, several trials |
+| Current phase | **11 — complete** |
+| Next phase | 12 — frontend catalog: the React + Vite storefront "FORM" against the real API |
 | Branch | `main`, tracking `origin/main` |
 | Repository | https://github.com/RishitheB0T/product-catalog-service (public) |
-| Last updated | 2026-10-22 |
+| Last updated | 2026-10-30 |
 
 **Commits so far** (each commit records the hash of the one before it, because a commit cannot contain its own hash)
 
@@ -37,7 +37,8 @@ Runtime role: None. Documentation only.
 | Phase 07 | `fab9876` | `test(backend): verify catalog API and database behavior` | Pushed and verified |
 | Phase 08 | `837a972` | `perf(database): optimize measured catalog search queries` | Pushed and verified |
 | Phase 09 | `bc82587` | `feat(cache): cache product details in Redis` | Pushed and verified |
-| Phase 10 | Recorded at the start of Phase 11 | `feat(cache): handle committed writes and Redis failures` | Pushed and verified when committed |
+| Phase 10 | `2abde5e` | `feat(cache): handle committed writes and Redis failures` | Pushed and verified |
+| Phase 11 | Recorded at the start of Phase 12 | `perf: add reproducible catalog benchmarks and evidence` | Pushed and verified when committed |
 
 <!-- BUILD FLOW 01.10.02 — Checks run in Phase 01 -->
 ## Checks run in Phase 01
@@ -202,6 +203,32 @@ All ran on 2026-10-29. Full details are in `BUILD_GUIDE.md`, Phase 10, and `docs
 - The stale-read race and stampedes remain documented limits (D-046, `docs/CACHING.md`).
 - Docker Desktop is installed per user; start it from its own install location if `docker info` fails.
 
+<!-- BUILD FLOW 01.10.15 — Checks run in Phase 11 -->
+## Checks run in Phase 11
+
+All ran on 2026-10-29 and 2026-10-30. Full details are in `BUILD_GUIDE.md`, Phase 11, and the results in
+`docs/PERFORMANCE.md`.
+- `.\scripts\run-benchmarks.ps1`, the published run (2026-10-30, 18:32): 15 trials, each clean on its first attempt,
+  with no failed request. Product detail served 1,016 requests per second with the cache off, 579 cold, and 3,310
+  warm. The search mix served 44.8 requests per second without the indexes and 144.1 with them.
+- Four earlier full runs were discarded, each for a reason the script now checks: Modern Standby, connections stalling
+  in Docker Desktop's forwarding (twice), and cold passes that weren't cold. None of their numbers is published.
+- Cold passes: 0 hits and 1,000 misses each. Warm trials: a 99.62% hit ratio; Redis evicted no keys.
+- Little's law matched every measured rate within 1%.
+- The script's rules were tested on eight synthetic k6 results, and its key deletion on the dev Redis.
+- Afterwards: no backend process or k6 container left; ports 24081–24083 free.
+
+**Carry-forward items**
+- Counts now dominate search time under load (`docs/PERFORMANCE.md`); D-041's options are the next lever if search
+  speed matters.
+- Not measured under load: a stopped Redis (the two 200 ms timeouts per read from Phase 10), writes, the rare-word
+  search, and the deepest page.
+- Windows PowerShell 5.1 on this machine puts a byte-order mark in front of text piped into native programs. The
+  `mysql` client ignores it (`bench-db.ps1` and `measure-queries.ps1` work), and `redis-cli` does not. Pass arguments
+  instead of piping to new tools.
+- Benchmarks need mains power and an open lid. The script keeps the computer awake, but a closed lid still sends it
+  into standby (and the run is then discarded).
+
 <!-- BUILD FLOW 01.10.03 — Environment -->
 ## Environment (inspected 2026-10-20)
 
@@ -218,7 +245,9 @@ All ran on 2026-10-29. Full details are in `BUILD_GUIDE.md`, Phase 10, and `docs
 | Ports | This project uses the 24xxx block on `127.0.0.1` (README "Ports"). At inspection, 8080, 5432, and 9090 were in use by other programs |
 | Local containers | `product-catalog-dev-mysql-1` and `product-catalog-dev-redis-1`; together about 430 MiB of memory while running |
 | Test containers | One shared `mysql:8.4.11` container per test run (about 400 MB) plus Testcontainers' cleanup container; Docker must be running |
-| Not installed | k6 (planned to run from Docker), AWS CLI (decided in Phase 15) |
+| k6 | Not installed; runs from the pinned `grafana/k6:2.3.0` image (Phase 11) |
+| Power | Modern Standby (S0 low-power idle): the system sleeps when the display turns off. Benchmarks keep it awake and need mains power |
+| Not installed | AWS CLI (decided in Phase 15) |
 
 <!-- BUILD FLOW 01.10.04 — Blockers and pending items -->
 ## Blockers and pending items
@@ -228,17 +257,20 @@ All ran on 2026-10-29. Full details are in `BUILD_GUIDE.md`, Phase 10, and `docs
 | GitHub repository and sign-in | — | Done on 2026-10-20: public repository created with the GitHub CLI; pushes verified |
 | `workflow` token scope for pushing CI files | Phase 14 | Pending. The current tokens are not known to include `workflow`, which GitHub requires for pushing files under `.github/workflows/`. Plan: `gh auth refresh -s workflow` when needed |
 | AWS account access and approval of instance, region, and cost | Phase 15 | Pending |
-| Anything blocking Phase 11 | — | None (k6 runs from its Docker image; Docker Desktop must be running) |
+| Anything blocking Phase 12 | — | None. Re-check the Node.js LTS line first: Node 26 was scheduled to become LTS on 2026-10-28, and this machine has 26.8.1 |
 
 <!-- BUILD FLOW 01.10.05 — Next action -->
 ## Next action
 
-Next: Phase 11 (plan §11 and §14).
-1. Record Phase 10's commit hash in the commits table above.
-2. Reproducible k6 scripts (k6 from its pinned Docker image) against the `bench` profile on 100,000 products.
-3. Product detail: the same endpoint with `catalog.cache.enabled` false and true; warm the JVM and MySQL for both,
-   warm Redis only for the cache scenario; report cold behavior separately.
-4. Search: measured separately from the cache, against the Phase 08 indexes.
-5. Several trials each; report mean, median, p95, throughput, and error rate, with the raw results committed.
-6. Write `docs/PERFORMANCE.md` and fill the README's performance section only with measured numbers.
-7. Commit `perf: add reproducible catalog benchmarks and evidence`, push, and verify on GitHub.
+Next: Phase 12 (plan §14, "Frontend catalog").
+1. Record Phase 11's commit hash in the commits table above.
+2. Re-check the version baseline for the frontend (plan §4): the Node.js LTS line, React, Vite, Vitest, and the
+   Testing Library packages. Record any change.
+3. Scaffold `frontend/` with Vite and React (JavaScript); the Vite dev server on `127.0.0.1:24173`, proxying `/api` to
+   the backend on 24081.
+4. The storefront: header, hero, search, categories, responsive grid, filters (a desktop panel and a mobile drawer),
+   chips with clear-all, sorting, pagination, and counts; debounced search with `AbortController`; state in the URL;
+   INR formatting; skeleton, empty, and error states; image fallbacks with documented licenses.
+5. Checks: lint, tests, a production build, and browser checks at about 375 px, tablet, and 1440 px (a manual
+   checklist marked unverified if no automation is available).
+6. Commit, push, and verify on GitHub.

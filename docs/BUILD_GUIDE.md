@@ -943,3 +943,108 @@ PUT /api/v1/products/42 ─► ProductService.updateProduct (transaction)
    rollback instead? the listener never runs
 Redis hung or down: every Redis step gives up after 200 ms ─► counted ─► MySQL answers; writes still succeed
 ```
+
+<!-- BUILD FLOW 01.05.13 — Phase 11 -->
+## Phase 11 — Benchmarks and evidence with k6
+
+**What we had before.** Search queries measured inside MySQL (Phase 08), and a cache tested for correctness
+(Phases 09–10), but no measurement of whole HTTP requests under load.
+
+**What we add.** Two k6 scripts; one script that runs the whole protocol and decides whether a run counts; the raw
+results with a report computed from them; and `docs/PERFORMANCE.md`.
+
+**Why.** "The cache makes it faster" is a claim until someone measures it. The measurement must be one that anyone
+can reproduce, with every number traceable to a raw file. Measuring inside MySQL alone leaves out the network, the
+JVM, JSON, and the cache itself.
+
+**Files in order**
+
+| BUILD FLOW | File | Role |
+|---|---|---|
+| 11.01 | `benchmarks/k6/product-detail.js` | One product by id: timed load, or one pass over the ids |
+| 11.02 | `benchmarks/k6/search.js` | Four searches in rotation, each reported separately |
+| 11.03 | `scripts/run-benchmarks.ps1` | The protocol, its validity checks, the result files |
+| 11.04 | `benchmarks/results/k6-summaries.json` | **(generated)** Setup, attempts set aside, every trial's raw summary |
+| 11.05 | `benchmarks/results/k6-report.md` | **(generated)** Medians and ranges computed from 11.04 |
+| 11.06 | `docs/PERFORMANCE.md` | Method, results, meaning, limits, discarded runs |
+
+Modified: README (status, what works, performance evidence, documentation map); `docs/CACHING.md` (status line);
+`docs/DECISIONS.md` (D-048 method, D-049 when a run counts); `docs/FILE_GUIDE.md`; `docs/PROGRESS.md`;
+`docs/LEARNING_LOG.md`. No backend code changed: the two benchmark-only settings are passed on the command line.
+
+**Relevant syntax**
+- *k6 options*:
+  - `scenarios: { load: { executor: 'constant-vus', vus, duration } }` for timed load; `shared-iterations` for exactly
+    1,000 requests.
+  - `exec.vu.idInTest` and `exec.scenario.iterationInTest` pick the id.
+  - `{ tags: { name } }` plus a threshold per tag makes k6 report each search separately.
+  - `handleSummary(data)` writes the summary file; `discardResponseBodies` saves memory.
+- *k6 metrics*:
+  - `http_req_duration` is sending + waiting + receiving, **without** connecting.
+  - `http_req_connecting` and `iteration_duration` show what that one leaves out.
+  - In the summary, `http_req_failed.values.passes` is the number of failed requests.
+  - `state.testRunDurationMs` is the real length of the run.
+- *Docker*: `docker run --rm -v <k6Dir>:/scripts:ro -v <work>:/results -e NAME=value grafana/k6:2.3.0 run --quiet
+  /scripts/<file>.js`; the script reads `__ENV.NAME`.
+- *Windows*:
+  - `SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED)`, called through `Add-Type`,
+    keeps the computer awake.
+  - `Get-WinEvent -FilterHashtable` finds Kernel-Power events 42 (sleep) and 506 (Modern Standby).
+  - `Win32_Battery.BatteryStatus` is 1 when the battery is discharging.
+- *Spring Boot*: `--server.tomcat.max-keep-alive-requests=-1` keeps connections open for good.
+
+**Commands we ran** (PowerShell)
+
+| Command | Purpose |
+|---|---|
+| `.\scripts\run-benchmarks.ps1 -Trials 1 -TrialDuration 3s -WarmupDuration 2s -SkipIndexComparison` | A short end-to-end run of the protocol and the report |
+| `.\scripts\run-benchmarks.ps1`, five times | Full runs: four discarded, the fifth published (`docs/PERFORMANCE.md`) |
+| `Get-WinEvent` for Kernel-Power events; `powercfg /a` | Find why the first run took three hours |
+| k6 against a closed port | See the exact warning k6 writes when a connection can't be opened |
+| Product-detail probes of 60 s and 120 s with k6, the second with `max-keep-alive-requests=-1`; `Get-NetTCPConnection -State TimeWait` | Reproduce the connection stalls, then show that open connections remove them |
+| `redis-cli` by hand: `SET`, the script's `DEL`, `EXISTS`; `INFO stats` | Find why the cold passes weren't cold; confirm that Redis evicted nothing |
+
+**Expected behavior.** With the cache warm, product detail should be clearly faster than with it off, and a miss
+should be slower than a cache-off read. Search should be faster with the indexes, but by much less than inside MySQL,
+because of the counts. Every number must come from the result files.
+
+**Actual checks** (2026-10-29 and 2026-10-30)
+
+| Check | Result |
+|---|---|
+| Published run (2026-10-30, 18:32) | 9.6 minutes; 15 trials, each on its first attempt; no failed request; trials lasted 30.0–30.1 s; slowest connection 21.7 ms |
+| Cold passes | 0 hits and 1,000 misses each |
+| Warm trials | 302,285 hits, 1,162 misses (all in trial 2, when the 60-second TTL ran out), no errors; Redis `evicted_keys:0` |
+| Little's law (10 users ÷ mean iteration time) | Matches every measured rate within 1% |
+| Script rules on synthetic k6 results | Eight cases: clean, overrun, two kinds of failed connection, slow connection, and a pass without a duration are judged correctly; a timeout after connecting and error statuses stop the run |
+| Key deletion on the dev Redis | Keys in all four batches removed, an unrelated key kept, an error answer from Redis caught |
+| After the runs | No backend process, no k6 container; ports 24081–24083 free |
+
+Mistakes and findings on the way:
+- **The laptop slept through the first run.** With Modern Standby, the display switching off puts the whole system
+  into standby. Two 30-second trials lasted 54 minutes and two hours, and the report still looked plausible.
+- **Connections hung inside Docker Desktop's forwarding.** Tomcat closes a connection after 100 requests. At hundreds
+  of requests per second, k6 then opened several new connections a second, and a few took 19.5 s to open or timed out
+  after 30 s. The measured request durations stayed normal. Only the run's length, `iteration_duration`, and
+  `http_req_connecting` showed it.
+- **A silent failure looked like a fast cache.** On a console set to UTF-8, Windows PowerShell 5.1 put a byte-order
+  mark in front of the `DEL` command piped to `redis-cli`, so nothing was deleted. `redis-cli` still exited with 0.
+  The "cold" passes were mostly hits, and their numbers looked like a great result. The cache counters exposed it.
+- **Windows PowerShell 5.1's `ConvertTo-Json` fails on an empty list**, so the script builds the set-aside list's
+  JSON by hand.
+- **The published run drifted from trial to trial.** The laptop's other work and clock speed change over minutes.
+  `docs/PERFORMANCE.md` shows the ranges and checks that the conclusions hold at their edges. The run was not
+  repeated to get nicer numbers.
+
+**How the pieces connect**
+
+```text
+run-benchmarks.ps1 (keeps the computer awake; refuses to start on battery)
+  ├─ bench-db.ps1 drop/create ─► catalog_bench, Flyway V1 (target=1), later V2
+  ├─ java -jar … bench profile + benchmark settings ─► 100,000 products seeded once
+  ├─ docker run grafana/k6 ─► search.js / product-detail.js ─► host.docker.internal:24083 ─► backend
+  │     └─ handleSummary ─► <label>.json, plus k6's output in <label>.out (scratch folder)
+  ├─ /actuator/metrics before and after each product-detail trial; Clear-MeasuredKeys before each cold pass
+  ├─ Get-Disturbance: count the trial, repeat it, or stop everything
+  └─ all trials counted, no sleep logged ─► k6-summaries.json ─► k6-report.md ─► PERFORMANCE.md, README
+```

@@ -520,6 +520,55 @@ history, with a pointer to its replacement).
   stopped Redis still costs two timeouts per read. Rejecting commands at once while disconnected, or a circuit
   breaker, would remove that cost for a stopped Redis; documented as extensions.
 
+## D-048 · How the benchmarks are run — Accepted (Phase 11)
+
+- **Decision:** k6 2.3.0 from its official Docker image, driven by `scripts/run-benchmarks.ps1`, against the `bench`
+  profile on 100,000 generated products. A closed model (10 virtual users, each sending its next request as soon as
+  the previous one answered) for 30-second trials, three trials per scenario, after a 20-second warm-up on a freshly
+  started backend. Product detail runs with the cache off, cold (each of 1,000 ids once, after deleting exactly those
+  keys), and warm; search runs without and with the Phase 08 indexes. Raw k6 summaries and a computed report are
+  committed.
+- **Why:** the same endpoint and request mix compared under identical conditions, with the switch as the only
+  difference; warm-ups remove JVM start-up effects; several trials show the run-to-run spread; the cold runs keep
+  "first request" effects out of the warm numbers instead of mixing them in.
+- **Alternatives:** an open model (a fixed arrival rate), which separates latency from throughput better but needs a
+  rate chosen below saturation for every scenario; JMeter or Gatling (heavier); k6 installed on Windows, which would
+  avoid Docker's network forwarding (the source of the rare connection hangs handled in D-049) but gives up the
+  pinned, identical-everywhere image.
+- **Limits:** everything (k6, the backend, MySQL, Redis, Docker's network forwarding) shares one laptop with 4 cores,
+  so absolute numbers depend on the machine and on what else runs; comparisons between scenarios of the same run are
+  what the numbers support. The metrics endpoint is switched on only for these local runs, on 127.0.0.1.
+
+## D-049 · When a benchmark run counts — Accepted (Phase 11)
+
+- **Decision:** `scripts/run-benchmarks.ps1` keeps the computer and its display awake while it runs, refuses to start
+  on battery (unless `-AllowBattery`), and judges every measured trial by facts about the run, never by its latency:
+  - **Set aside and repeated** (up to three attempts, each listed in the report with its reason): a timed run that
+    lasted more than 5 s past its planned length; a request that could not open a connection (`dial` in k6's
+    "Request Failed" warning); a connection that took more than 5 s to open.
+  - **Stops everything:** any other failed request (an error status, a reset, a timeout after connecting), because
+    that is the backend's own result; and any sleep or Modern Standby that Windows logged during the run.
+
+  Nothing is written to `benchmarks/results/` unless the whole run passes. The benchmark backend also runs with
+  `server.tomcat.max-keep-alive-requests=-1`, so each virtual user keeps one connection for the whole run.
+- **Why:** the first full run (2026-10-29) took three hours instead of fifteen minutes. The laptop slipped into Modern
+  Standby whenever its display went off, and two 30-second trials lasted 54 minutes and two hours. Later runs on
+  mains power found a second problem. Tomcat closes a connection after 100 requests by default, so at several hundred
+  requests per second k6 opened several new connections a second through Docker Desktop's forwarding to the host.
+  Some of those connections took 19.5 s to open or timed out after 30 s, three attempts in a row, while the measured
+  request durations stayed normal. Neither problem shows in the latency numbers themselves. With connections kept
+  open, a two-minute probe sent 111,541 requests with no failures, no reconnects, and no connection slower than 3 ms.
+  Rules based only on the run's own facts can't be bent toward a preferred result, and repeating a disturbed trial is
+  cheaper than repeating the whole protocol.
+- **Alternatives:** rerunning everything until one run is clean (the same rules, much slower); keeping disturbed
+  trials and explaining them (their throughput is wrong by an unknown amount); dropping the failed requests (hides
+  them); a shorter k6 request timeout (shortens a hang but still loses the requests); k6 on Windows (see D-048),
+  which keeps Tomcat's default but changes the load generator.
+- **Limits:** a disturbance shorter than the thresholds still passes, for example a two-second pause. The trial-to-trial
+  ranges in the report are the remaining guard, and `docs/PERFORMANCE.md` reads the numbers with that in mind. Keeping
+  connections open removes the cost of a reconnect every 100 requests from every scenario alike. It doesn't change how
+  the scenarios compare, but absolute numbers are slightly better than with Tomcat's default.
+
 <!-- BUILD FLOW 01.08.03 — Open questions -->
 ## Open questions (each is decided in its phase)
 

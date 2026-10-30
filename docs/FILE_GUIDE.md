@@ -36,6 +36,7 @@ here instead. Binary and generated internals are grouped rather than listed line
 | 01.09 | `docs/LEARNING_LOG.md` | Concepts learned and small exercises for each phase | Build Guide | Readers | After each phase |
 | 01.10 | `docs/PROGRESS.md` | Current phase, last commit, checks, blockers, next action | All docs | Read first when resuming work | Whenever work resumes |
 | 09.05 | `docs/CACHING.md` | The product-detail cache: what is and is not cached, key and value format, TTL, reads, after-commit eviction on writes, Redis failures with measured costs, metrics, and the remaining consistency limits | 09.01, 09.02, 05.10 | Readers, interview preparation | Before changing the cache |
+| 11.06 | `docs/PERFORMANCE.md` | The benchmark method and results: product detail with the cache off, cold, and warm; search without and with the indexes; how to read the numbers, and their limits | `benchmarks/results/`, 11.01–11.03 | Readers, interview preparation | When asked "how fast is it, and how do you know?" |
 | 08.15 | `docs/QUERY_OPTIMIZATION.md` | How search was measured and optimized: dataset, captured SQL, plans before and after V2, costs, what did not improve, how to reproduce | `benchmarks/`, V2, the two measurement scripts | Readers, interview preparation | When asking "why these indexes?" |
 
 <!-- BUILD FLOW 01.06.04 — backend/ (added in Phase 02) -->
@@ -115,6 +116,7 @@ starts the application).
 | 03.02 | `infra/.env.example` | Template for the private `infra/.env`: database name, user, password placeholders, host ports | — | `scripts/dev-services.ps1` (copies it on the first `up`) | When adding a setting that Compose needs |
 | 03.03 | `scripts/dev-services.ps1` | One command for `up`, `status`, `logs`, `down`, and `reset -Force`; creates `infra/.env` with random passwords on the first `up` | `infra/compose.dev.yaml`, `infra/.env.example`, Docker | The developer on Windows | Whenever you start or stop local services |
 | 08.02 | `scripts/bench-db.ps1` | Creates, inspects (rows, migrations, indexes and their sizes), empties, or drops `catalog_bench`; switches MySQL's general query log on and off to capture the application's SQL | `infra/compose.dev.yaml`, `infra/.env`, Docker | The developer, before and during measurements | Before measuring queries |
+| 11.03 | `scripts/run-benchmarks.ps1` | Runs the whole benchmark protocol (fresh backend per part, warm-up, trials, cache counters) with k6 from Docker, keeping the computer awake; repeats trials disturbed outside the backend and stops on backend errors, sleep, or standby (D-049); then writes the merged raw results and the report | Docker, 08.02, the jar, 11.01, 11.02 | The developer | Before running or questioning a benchmark |
 | 08.09 | `scripts/measure-queries.ps1` | Runs each query of a query file with `EXPLAIN ANALYZE` (warm, three times, median) and fingerprints its result; compares with a baseline and fails if any result differs | `benchmarks/queries/`, a filled `catalog_bench` | The developer | To produce or check measurements |
 
 <!-- BUILD FLOW 01.06.06 — benchmarks/ (added in Phase 08) -->
@@ -126,6 +128,10 @@ starts the application).
 | 08.10 | `benchmarks/query-plans/before-v2.txt` | **(generated)** Measurements before V2: context, summary, and every query's times, result fingerprint, and plan | 08.08, 08.09, `catalog_bench` at V1 | `docs/QUERY_OPTIMIZATION.md` | With the after file |
 | 08.12 | `benchmarks/query-plans/after-v2.txt` | **(generated)** Measurements after V2, with the comparison: every result identical | 08.08, 08.09, 08.10, `catalog_bench` at V2 | `docs/QUERY_OPTIMIZATION.md` | To see what the indexes changed |
 | 08.13 | `benchmarks/queries/index-alternatives.sql` | "What if" variants with index hints: what one index contributes, and why the optimizer chose as it did | 08.08, the V2 indexes | `scripts/measure-queries.ps1` | When questioning an index |
+| 11.01 | `benchmarks/k6/product-detail.js` | k6 load for `GET /api/v1/products/{id}` over 1,000 fixed ids: constant virtual users for a time, or one pass per id (cold cache) | The bench backend | `scripts/run-benchmarks.ps1` | To see exactly what was measured |
+| 11.02 | `benchmarks/k6/search.js` | k6 load for four storefront searches in rotation, each tagged and reported separately | The bench backend | `scripts/run-benchmarks.ps1` | To see exactly what was measured |
+| 11.04 | `benchmarks/results/k6-summaries.json` | **(generated)** The setup, the attempts set aside, and every counted trial's complete k6 summary, plus the cache counters around each product-detail run | 11.01–11.03 | `k6-report.md`, `docs/PERFORMANCE.md` | To trace a number back to its source |
+| 11.05 | `benchmarks/results/k6-report.md` | **(generated)** Tables computed from `k6-summaries.json`: medians and ranges per scenario | 11.04 | `docs/PERFORMANCE.md`, the README | To see the results at a glance |
 | 08.14 | `benchmarks/query-plans/index-alternatives.txt` | **(generated)** Measurements of the "what if" variants | 08.13, 08.09 | `docs/QUERY_OPTIMIZATION.md` | With section "The four indexes" |
 
 <!-- BUILD FLOW 01.06.03 — Generated files -->
@@ -135,4 +141,6 @@ Generated files are never edited to add comments. Their explanation lives in the
 - Maven Wrapper (Phase 02): `backend/mvnw`, `backend/mvnw.cmd`, `backend/.mvn/wrapper/maven-wrapper.properties`.
 - Measurements (Phase 08): the three files in `benchmarks/query-plans/`, written by `scripts/measure-queries.ps1`.
   Each starts with a header saying so; they are regenerated, never edited.
+- Benchmarks (Phase 11): `benchmarks/results/k6-summaries.json` and `k6-report.md`, written by
+  `scripts/run-benchmarks.ps1`; regenerated by each run, never edited.
 - Coming later: `package-lock.json` (Phase 12).

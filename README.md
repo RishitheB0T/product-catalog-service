@@ -14,11 +14,12 @@ A product catalog built from an empty folder in documented phases, with every fi
 **Spring Boot** REST API over **MySQL**, **Redis** caching for product details, and a **React** storefront that
 uses the real API.
 
-> **Status: Phase 10 of 16 complete.** The product API searches the catalog (filters, sorting, pagination) and reads,
+> **Status: Phase 11 of 16 complete.** The product API searches the catalog (filters, sorting, pagination) and reads,
 > creates, updates, and deletes single products, with validation, optimistic locking, and one error format; production
 > settings are read-only. Search queries were measured on 100,000 products and indexed from the measured plans.
 > Product details are cached in Redis, cleared after every committed write, with MySQL as the fallback when Redis
-> fails. 107 tests cover it, including full-stack tests over real HTTP and a Redis outage. This README always
+> fails. 107 tests cover it, including full-stack tests over real HTTP and a Redis outage. Load tests with k6 measured
+> the whole requests: the cache serves product details about 3.3 times faster than MySQL alone. This README always
 > describes what actually works; anything not built yet is labeled *planned*.
 
 <!-- BUILD FLOW 01.04.01 — What works today -->
@@ -36,7 +37,7 @@ uses the real API.
 | Measured query optimization: 100,000-product benchmark data, `EXPLAIN ANALYZE` before and after, search indexes (V2) | Done (Phase 08) |
 | Redis product-detail cache: cache-aside reads, versioned keys, JSON, 60-second TTL, metrics | Done (Phase 09) |
 | Cache eviction after committed writes, 200 ms Redis timeouts with MySQL fallback; cache switched on | Done (Phase 10) |
-| Benchmarks and performance report | Planned (Phase 11) |
+| Reproducible k6 benchmarks: cache off, cold, and warm; search without and with indexes; raw results and report | Done (Phase 11) |
 | React storefront and local admin | Planned (Phases 12–13) |
 | Production containers and CI | Planned (Phase 14) |
 | AWS EC2 deployment | Planned (Phase 15; needs AWS access and approval) |
@@ -334,7 +335,24 @@ three warm runs), before and after the four indexes of migration V2. Every query
 
 Counts and the deepest page barely changed, and the no-match search got slower; why, and what each index costs, is in
 [`docs/QUERY_OPTIMIZATION.md`](docs/QUERY_OPTIMIZATION.md), with the raw plans in `benchmarks/query-plans/` and the
-steps to reproduce them. Whole HTTP requests, and the Redis cache, are measured with k6 in Phase 11 (*planned*).
+steps to reproduce them.
+
+**Whole HTTP requests (Phase 11)**, measured with k6 (10 users, each sending its next request as soon as the last one
+answered; three 30-second trials after a warm-up) on the same 100,000 products, with everything on one laptop.
+Medians of the three trials:
+
+| Scenario | Throughput | Median | p95 |
+|---|---:|---:|---:|
+| Product detail, cache off (MySQL every time) | 1,016 req/s | 8.31 ms | 16.75 ms |
+| Product detail, cache on, cold (every request a miss) | 579 req/s | 15.99 ms | 23.82 ms |
+| Product detail, cache on, warm (99.6% hits) | 3,310 req/s | 2.35 ms | 5.35 ms |
+| Search mix, without the V2 indexes | 44.8 req/s | 189–253 ms | 296–383 ms |
+| Search mix, with the V2 indexes | 144.1 req/s | 33–91 ms | 74–149 ms |
+
+The search rows give the range over the four searches in the mix. The indexes help less end to end than inside MySQL,
+because every search also runs a `COUNT`. The method, every trial's range, the limits of a one-laptop benchmark, and
+four discarded runs are in [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md). The raw k6 summaries are in
+`benchmarks/results/`, and `.\scripts\run-benchmarks.ps1` reproduces them in about ten minutes.
 
 ## Deployment status
 
@@ -354,4 +372,5 @@ instance, region, and cost.
 | [`docs/DECISIONS.md`](docs/DECISIONS.md) | Choices and trade-offs |
 | [`docs/QUERY_OPTIMIZATION.md`](docs/QUERY_OPTIMIZATION.md) | How search was measured and indexed, with the evidence |
 | [`docs/CACHING.md`](docs/CACHING.md) | The Redis product-detail cache: keys, TTL, flows, failures, limits |
+| [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md) | Load tests with k6: the cache and the indexes measured end to end, and how far the numbers go |
 | [`docs/LEARNING_LOG.md`](docs/LEARNING_LOG.md) | Concepts and exercises for each phase |
