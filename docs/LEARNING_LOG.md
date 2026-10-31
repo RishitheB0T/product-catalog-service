@@ -483,3 +483,43 @@ published files.
 5. Open the filter drawer with the keyboard only. Where is focus, how do you close it, and where does focus go
    afterwards? Which browser feature does that work?
 6. Add a photo for one more product by following `docs/IMAGE_CREDITS.md`. Which licenses would you reject, and why?
+
+<!-- BUILD FLOW 01.09.14 — Phase 13 -->
+## Phase 13 — Product pages, the local admin, and accessibility
+
+**Concepts**
+- **Client-side routing.** A single-page app changes the address with `pushState` and draws the matching page itself.
+  The server must answer every page address with `index.html`, or a refresh shows a 404.
+- **External stores.** `useSyncExternalStore` is React's safe way to read state that lives outside React, such as the
+  address bar or a browser API, without tearing (parts of the page showing different values).
+- **Links that stay links.** An in-app link is still an `<a href>`. Only plain left clicks are taken over, so new
+  tabs, copying, and screen readers keep working.
+- **Focus management.** After a page change, move focus to the new content (here `<main>`), and set the document
+  title. After a deletion, move focus to the confirmation message, because the focused button is gone.
+- **Scroll restoration.** Remember the scroll position in each history entry, and restore it on Back once the earlier
+  page is drawn. Keeping recent results in memory lets it be drawn at once.
+- **Hiding is not security.** The interface hides the admin when writes are off; the server refuses writes anyway.
+- **Validate twice.** Check in the browser for speed and clear messages; the server checks again because any client
+  can be bypassed. The server's answer wins.
+- **Accessible forms:**
+  - a `<label>` for every field;
+  - hints and errors linked with `aria-describedby`, and `aria-invalid` on fields with errors;
+  - an error summary that receives focus, with links to the fields.
+- **Optimistic locking in a UI.** Send the version you loaded; on 409, explain what happened and offer the latest
+  version instead of overwriting someone else's change.
+- **Safe destructive actions.** Confirm in a modal dialog, focus the harmless choice first, and say what happened
+  afterwards.
+- **Tests that can fail.** Break the code on purpose to prove a test notices. Wait for effects (such as a title) instead
+  of assuming they ran.
+
+**Exercises**
+1. Open a product page, scroll the catalog first, and press Back. Where does the page land, and which two pieces of
+   code make that happen?
+2. Ctrl+click a product card. Why does it open in a new tab, when a plain click doesn't reload the page?
+3. Start the backend with `--catalog.writes-enabled=false`, then send a `DELETE` with `curl.exe`. What answers, and
+   why is hiding the Admin link not enough on its own?
+4. Open the same product's edit form in two tabs, save in one, then save in the other. Follow the request and the
+   response through `ProductFormPage`.
+5. Submit the empty form using only the keyboard. Where is focus afterwards, and how do you reach the Price field
+   from there?
+6. Remove `position: relative` from `.table-wrap` and check the admin page at 375 pixels. Explain what you see.

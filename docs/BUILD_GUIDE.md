@@ -1170,3 +1170,130 @@ address bar ?q=linen&page=2 ──► useUrlState (readSearchState) ──► se
 search state ─► toApiQuery ─► useProductSearch: abort the old request, fetch /api/v1/products?… ─► Vite proxy ─► Spring Boot
 answer ─► App: ErrorState | GridSkeleton | EmptyState | ProductGrid (ProductCard: photo on a mat or monogram) + Pagination
 ```
+
+<!-- BUILD FLOW 01.05.15 — Phase 13 -->
+## Phase 13 — Product pages, the local admin, and accessibility
+
+**What we had before.** A single catalog page. Products could be changed only through the API, for example with the
+`.http` examples.
+
+**What we add.**
+- **Pages:** a product page for each product, and a local admin to add, edit, and delete products, with a
+  confirmation before deleting.
+- **The write switch:** the storefront asks the server whether writes are on, and shows the admin only then.
+- **A small router:** in-app links, Back and Forward with restored scroll positions, focus moved to the new page,
+  and a title per page.
+- **Accessible forms:** labels, hints, and errors wired for screen readers; an error summary; explained conflicts.
+
+**Why.** The plan requires the detail and admin views. Every write path the API offers (validation, duplicate SKUs,
+version conflicts, read-only mode) should be explained to a person in plain words, not just survived.
+
+**Files in order**
+
+| BUILD FLOW | File | Role |
+|---|---|---|
+| 13.01 | `backend/src/main/java/com/example/catalog/api/SettingsController.java` | `GET /api/v1/settings` |
+| 13.02–13.03 | `frontend/src/lib/routes.js`, `components/Link.jsx` | Pages and addresses; in-app links |
+| 13.04–13.06 | `frontend/src/hooks/useSettings.js`, `useProduct.js`, `usePageTitle.js` | Settings, one product, tab titles |
+| 13.07–13.11 | `frontend/src/pages/CatalogPage.jsx`, `ProductPage.jsx`, `AdminPage.jsx`, `ProductFormPage.jsx`, `NotFoundPage.jsx` | The pages |
+| 13.12–13.14 | `frontend/src/components/ConfirmDialog.jsx`, `FormField.jsx`, `lib/productForm.js` | Dialog, accessible field, the form's rules |
+| 13.15–13.19 | `productForm.test.js`, `routes.test.jsx`, `test/fakeApi.js`, `ProductPage.test.jsx`, `AdminPages.test.jsx` | Tests and the shared fake backend |
+
+Modified:
+- **Backend:** `ProductApiIntegrationTest` (07.01: the settings in both modes).
+- **Frontend core:**
+  - `useUrlState.js` (12.13) is now the router's core.
+  - `App.jsx` (12.29) is now the frame and router; the catalog moved to `CatalogPage`.
+  - `products.js` (12.12) gained five calls and typed errors.
+  - `useProductSearch.js` (12.15) remembers recent answers for Back.
+- **Frontend components:**
+  - `SiteHeader` (12.16) has the Admin link.
+  - `SearchBox` (12.18) takes its own id and label.
+  - `ProductGrid` and `ProductCard` (12.24, 12.25) make each card a link.
+  - `catalog.js` (12.10) gained the monogram helper.
+- **Styles and tests:** `app.css` (12.09.19–12.09.22); `setup.js` (12.30); `App.test.jsx` (12.32: the shared fake
+  backend).
+- **Docs:** D-054 to D-056; plan §4; `REQUEST_FLOWS.md` (READ-01, WRITE-01, WRITE-08); README; FILE_GUIDE;
+  PROGRESS; LEARNING_LOG.
+
+**Relevant syntax**
+- *React*:
+  - `useSyncExternalStore(subscribe, getSnapshot)` subscribes to state outside React (the address bar).
+  - `key` resets a component: `key={product.version}` gives the form a fresh start.
+  - A render prop (`children(props)`) lets `FormField` hand attributes to the control.
+  - `useRef` gives direct access to a DOM element, here to move focus.
+- *History API*: `pushState(state, '', url)` with a state object (the results address, a message);
+  `history.state`; `history.back()`; `history.scrollRestoration = 'manual'`.
+- *HTML and ARIA*:
+  - links: `<a href>` with `preventDefault()` only for plain clicks;
+  - native elements: `<dialog>` with `showModal()`, and `<output>` (implicit role "status");
+  - forms: `aria-describedby`, `aria-invalid`, `fieldset`/`legend`;
+  - tables: `<th scope="row">` and `<caption>`;
+  - focus: `tabIndex={-1}` on elements that receive focus from code;
+  - CSS: `:has(:focus-visible)`.
+- *Testing*: `toHaveAccessibleDescription`, `toHaveFocus`, `within(...)`, `user.selectOptions`, a stubbed `fetch` that
+  records every call; a pending promise to keep a request open.
+
+**Commands we ran** (PowerShell)
+
+| Command | Purpose |
+|---|---|
+| `.\mvnw.cmd -B -ntp clean verify` | The backend with the settings endpoint |
+| `npm run lint`, `npm test` (several full runs), `npm run build` | Lint, tests, and a check for flaky tests |
+| A deliberately broken `deleteProduct` call, then `npx vitest run src/pages/AdminPages.test.jsx` | Prove the delete test fails when deleting doesn't happen |
+| `.\scripts\dev-services.ps1 up`; the jar with `dev`; `npm run dev` | The real stack, writes allowed |
+| Browser scripts (Playwright API, headless Chromium) | The journeys, keyboard paths, phone layouts, screenshots |
+| The jar with `--catalog.writes-enabled=false`; a direct `DELETE` from the page | Read-only mode, in the interface and on the server |
+
+**Expected behavior.**
+- **Navigation:** a card opens its product page, Back returns to the same results and scroll position, and focus moves
+  to the new page.
+- **Forms:** invalid input is explained before anything is sent, and the server's answers appear on the right field.
+- **Conflicts and deletes:** conflicts are explained, not overwritten, and nothing is deleted without confirmation.
+- **Read-only:** a read-only server shows no admin, and refuses writes anyway.
+
+**Actual checks** (2026-10-31)
+
+| Check | Result |
+|---|---|
+| Backend `clean verify` | 110 tests, 0 failures (two new: the settings with writes on and off) |
+| `npm run lint` / `npm test` / `npm run build` | Clean (after the fixes below) / 39 passed in four full runs in a row / 259 KB JavaScript (80 KB gzipped), 19 KB CSS |
+| Proving a test can fail | With the delete call disabled, "asks before deleting, deletes, and says so" failed; restored afterwards |
+| Real stack: product page | Title "Ceramic Bud Vase — FORM"; focus on `<main>`; photo loaded with its alt text; "In stock: 25 available"; SKU shown |
+| Real stack: back to results | Same address (`?category=HOME`), scroll position 500 → 500, the category still selected |
+| Keyboard | Tab order: skip link, wordmark, Admin, search, categories. Enter on a card opened its page; the card showed the focus ring |
+| Add a product | Empty submit: focus on the summary listing 6 problems, no request sent; a summary link focused its field; a SKU typed in lower case became capitals; "Saved “…”." |
+| Edit and the cache | After changing the price, the product page showed ₹1,550 at once (the cached copy was evicted, Phase 10) |
+| Version conflict | A second writer saved first: the form explained it, and "Load the latest version" showed their price (₹1,600) |
+| Delete by keyboard | The dialog opened with focus on Cancel; Escape closed it and returned focus, with no request sent; Tab and Enter on "Delete product" sent one DELETE; the message received focus; the product page then said "This product doesn't exist." |
+| Phone width (375 px) | Product page and form: no sideways scrolling. Admin: the table scrolls inside its frame (after a fix), and focusing an off-screen button scrolls it into view |
+| Read-only server | No Admin link and no edit link; `/admin` and `/admin/products/new` explain that changes are off and show no form; a `DELETE` sent directly from the page got 403 `writes-disabled`, and the product still existed |
+| Console | Only the deliberate 409 (conflict), 404 (after delete), and 403 (read-only check) |
+
+Mistakes and findings on the way:
+- **Lint found seven accessibility issues:**
+  - an `alt` text that said "photo of";
+  - four `role="status"` paragraphs, now `<output>`;
+  - a scroll region with `tabIndex={0}`, now a `<section>` whose links and buttons are the keyboard path.
+- **A test that passed alone failed in the full suite.** The page title is set by an effect, so the test now waits
+  for it. Four full runs then passed in a row.
+- **The admin table stretched the page on phones.** A visually hidden column header was positioned against the page
+  instead of the scrolling frame. `position: relative` on the frame fixed it.
+- **Links styled as buttons kept the underline,** which showed in the screenshots.
+- **Header order:** CSS `order` would have made the visual order and the Tab order disagree, so the Admin link moved
+  before the search box in the HTML instead.
+- **Restoring the sabotaged file broke its special characters.** Windows PowerShell 5.1 read the UTF-8 file as
+  Windows-1252, so writing it back double-encoded “ ” — …. This was noticed in the check output and reversed exactly
+  (UTF-8 → Windows-1252 bytes); every frontend file was then scanned for the damage, and none remained.
+
+**How the pieces connect**
+
+```text
+address bar ─► useUrlState (useSyncExternalStore) ─► App: matchRoute(pathname)
+   "/"                       ─► CatalogPage ─► ProductCard <Link to=/products/42 state={from}>
+   "/products/42"            ─► ProductPage ─► useProduct ─► GET /api/v1/products/42 ─► "Back to results" = history.back()
+   "/admin"                  ─► AdminPage   ─► list (search) · Edit <Link> · Delete ─► ConfirmDialog ─► DELETE
+   "/admin/products/new|42/edit" ─► ProductFormPage ─► validateProduct ─► POST | PUT {…, version} ─► navigate(/admin, flash)
+useSettings ─► GET /api/v1/settings ─► writesEnabled ─► Admin link, edit link, admin pages (server still enforces 403)
+navigate(): pushState + scrollY saved ─► useNavigationEffects: restore on Back, top + focus <main> on a new page
+```

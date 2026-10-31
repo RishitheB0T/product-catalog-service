@@ -17,8 +17,8 @@ Runtime role: None. Documentation only.
 
 | Item | Value |
 |---|---|
-| Current phase | **12 — complete** |
-| Next phase | 13 — product detail view, local admin (create, edit, delete), accessibility polish |
+| Current phase | **13 — complete** |
+| Next phase | 14 — production containers (Dockerfiles, Nginx, production Compose) and CI (GitHub Actions) |
 | Branch | `main`, tracking `origin/main` |
 | Repository | https://github.com/RishitheB0T/product-catalog-service (public) |
 | Last updated | 2026-10-31 |
@@ -39,7 +39,8 @@ Runtime role: None. Documentation only.
 | Phase 09 | `bc82587` | `feat(cache): cache product details in Redis` | Pushed and verified |
 | Phase 10 | `2abde5e` | `feat(cache): handle committed writes and Redis failures` | Pushed and verified |
 | Phase 11 | `d64f10f` | `perf: add reproducible catalog benchmarks and evidence` | Pushed and verified |
-| Phase 12 | Recorded at the start of Phase 13 | `feat(frontend): build the storefront catalog` | Pushed and verified when committed |
+| Phase 12 | `ae84b5d` | `feat(frontend): build the storefront catalog` | Pushed and verified |
+| Phase 13 | Recorded at the start of Phase 14 | `feat(frontend): add product pages and the local admin` | Pushed and verified when committed |
 
 <!-- BUILD FLOW 01.10.02 — Checks run in Phase 01 -->
 ## Checks run in Phase 01
@@ -255,6 +256,30 @@ All ran on 2026-10-30. Full details are in `BUILD_GUIDE.md`, Phase 12.
   builds images with it.
 - The local `catalog_bench` database was deleted by the dev reset; `scripts/run-benchmarks.ps1` recreates it.
 
+<!-- BUILD FLOW 01.10.17 — Checks run in Phase 13 -->
+## Checks run in Phase 13
+
+All ran on 2026-10-31. Full details are in `BUILD_GUIDE.md`, Phase 13.
+- Backend `.\mvnw.cmd clean verify`: 110 tests, 0 failures.
+- Frontend: lint clean; 39 tests passed in four full runs in a row; the build succeeded. With the delete call
+  deliberately disabled, the delete test failed, so it really checks deleting.
+- Real stack with writes allowed, in a headless browser:
+  - card to product page and back, to the same scroll position;
+  - keyboard order and Enter on a card;
+  - add with an empty submit first, then a valid one;
+  - edit, then the product page showed the new price at once;
+  - a staged version conflict;
+  - a delete done with the keyboard (Cancel focused first, Escape cancels).
+- Phone width: no sideways scrolling, and the admin table scrolls inside its frame.
+- Read-only server (`--catalog.writes-enabled=false`): no admin in the interface; a direct `DELETE` got 403
+  `writes-disabled`.
+
+**Carry-forward items**
+- The server must answer every page address (`/products/42`, `/admin`) with `index.html`. Vite does this in
+  development, and Phase 14's Nginx configuration needs a fallback (`try_files … /index.html`).
+- The admin is meant for local development only: there is no sign-in (plan §1). Production stays read-only (D-007).
+- Possible later polish: a warning before leaving a form with unsaved changes.
+
 <!-- BUILD FLOW 01.10.03 — Environment -->
 ## Environment (inspected 2026-10-20)
 
@@ -283,18 +308,26 @@ All ran on 2026-10-30. Full details are in `BUILD_GUIDE.md`, Phase 12.
 | GitHub repository and sign-in | — | Done on 2026-10-20: public repository created with the GitHub CLI; pushes verified |
 | `workflow` token scope for pushing CI files | Phase 14 | Pending. The current tokens are not known to include `workflow`, which GitHub requires for pushing files under `.github/workflows/`. Plan: `gh auth refresh -s workflow` when needed |
 | AWS account access and approval of instance, region, and cost | Phase 15 | Pending |
-| Anything blocking Phase 13 | — | None |
+| Anything blocking Phase 14 | — | The `workflow` token scope (row above) before pushing `.github/workflows/`. Everything else can be built and run locally first |
 
 <!-- BUILD FLOW 01.10.05 — Next action -->
 ## Next action
 
-Next: Phase 13 (plan §14, "Detail, admin, accessibility, polish").
-1. Record Phase 12's commit hash in the commits table above.
-2. Decide routing for the detail and admin views (React Router or a small hand-written router; D-050).
-3. The product detail view: image, description, price, stock, and SKU, from `GET /api/v1/products/{id}`.
-4. The local admin: create, edit, and delete with validation messages from the API, version conflicts (409),
-   delete confirmation in an accessible dialog, and success feedback. It respects the server's write switch, and the
-   server still enforces it.
-5. Accessibility: keyboard paths, visible focus, labeled inputs, dialogs, contrast, reduced motion.
-6. Checks: frontend tests, and browser checks of CRUD, keyboard paths, and mobile layouts.
-7. Commit, push, and verify on GitHub.
+Next: Phase 14 (plan §14, "Production containers and CI").
+1. Record Phase 13's commit hash in the commits table above.
+2. Re-check the image versions (plan §4): `eclipse-temurin` 21 JDK and JRE, Nginx stable, Node 26 LTS for the
+   frontend build stage, and the GitHub Actions versions.
+3. Multi-stage Dockerfiles: the backend (built with the wrapper, run as a non-root user) and the frontend (built with
+   Node, served by Nginx).
+4. Nginx: the static files, the SPA fallback (`try_files $uri /index.html`) that the Phase 13 router needs, and `/api`
+   proxied to the backend.
+5. A production Compose file: only Nginx published (`127.0.0.1:24080` locally), MySQL and Redis internal, a persistent
+   volume, health checks, settings from the environment, the `prod` profile (read-only), limited Actuator exposure.
+6. GitHub Actions: backend `verify` (with Testcontainers) and frontend lint, test, and build. Run
+   `gh auth refresh -s workflow` before pushing the workflow file.
+7. `docs/DEPLOYMENT.md`, then checks:
+   - the stack is healthy, smoke tests pass through Nginx, and writes get 403;
+   - a clean checkout rebuilds;
+   - the image's jar contains its YAML files;
+   - CI is green on GitHub.
+8. Commit, push, and verify on GitHub.

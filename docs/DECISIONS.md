@@ -632,12 +632,75 @@ history, with a pointer to its replacement).
 - **Limits:** the development machine runs Node 26.8.1. That is the same major line, but older than the LTS
   release; updating it is recommended, not required.
 
+## D-054 · A small hand-written router — Accepted (Phase 13)
+
+- **Decision:** routing is done with about 60 lines of the project's own code:
+  - a hook that reads the address bar through `useSyncExternalStore`;
+  - `navigate()`;
+  - a `<Link>` that turns plain clicks into in-app navigation;
+  - one `matchRoute()` function for the five pages (catalog, product, admin list, new, edit).
+
+  After a move it restores the scroll position (Back and Forward) or starts at the top and moves focus to `<main>`.
+  Recent search answers are kept in memory, so Back shows the results at once, at the old position.
+- **Why:**
+  - Five flat routes need no nesting, loaders, or route-level code splitting.
+  - Every line can be read and explained, and the bundle grows by nothing.
+  - The parts a library would hide are now explicit: history entries, focus after navigation, and scroll restoration.
+- **Alternatives:**
+  - React Router 8.5.0, the planned candidate: nested routes, data loaders, and a well-tested scroll restoration. It is
+    worth adopting if the site grows nested layouts.
+  - Hash-based URLs (`/#/products/42`), which avoid server fallbacks but give worse URLs.
+- **Limits:**
+  - The server must answer every page address with `index.html`: Vite does this in development, and Nginx needs a
+    fallback in Phase 14.
+  - Scroll positions are restored only within one visit.
+
+## D-055 · The server tells the storefront whether writes are on — Accepted (Phase 13)
+
+- **Decision:** `GET /api/v1/settings` returns `{"writesEnabled": …}`. The storefront shows the Admin link, the edit
+  links, and the admin pages only when it is `true`. If the settings can't be read, it behaves as read-only.
+- **Why:**
+  - Offering buttons that always fail is poor design.
+  - Hiding them is not security: the service refuses every write while the switch is off (403 `writes-disabled`, D-007
+    and D-026),
+    whatever a client does. The read-only browser check sent a DELETE directly and got exactly that.
+  - The flag reveals nothing that a failed write wouldn't.
+- **Alternatives:**
+  - Building the frontend with a different flag per deployment, which would put configuration in the bundle and
+    allow it to disagree with the server.
+  - Trying a write and reacting to 403, which is too late for a good interface.
+- **Limits:** one request per page load; the value is read once and isn't refreshed while the page stays open.
+
+## D-056 · How the admin handles input and conflicts — Accepted (Phase 13)
+
+- **Decision:**
+  - **Checks:** the form checks its input with the same rules as the API before sending. The server's answer always
+    wins, and is shown next to the field it names.
+  - **Error summary:** after a failed submit, focus moves to a list of every problem, each a link to its field.
+  - **Conflicts:**
+    - A version conflict (409) explains that someone else saved first, and offers to load the latest version,
+      replacing what was typed.
+    - A duplicate SKU (409) is shown on the SKU field.
+  - **Deleting:** it asks first. Cancel is focused, so Enter can't delete by reflex. The confirmation message then
+    receives focus.
+- **Why:**
+  - Checking in the browser saves a round trip for most mistakes. The server checks again, because a browser can be
+    bypassed.
+  - The error-summary pattern (from the UK government's design system) makes problems findable by keyboard and screen
+    reader.
+  - Overwriting someone else's change silently is the failure optimistic locking exists to prevent (D-027). The form
+    makes the conflict visible instead of retrying blindly.
+- **Alternatives:** merging the two versions field by field (complex, and rarely needed for a local admin); a last-write-
+  wins PUT without a version (loses changes); undo instead of confirming deletes (needs soft deletion).
+- **Limits:** no warning when leaving a form with unsaved changes; no bulk actions; one person's admin, not an
+  authenticated multi-user tool (plan §1: no full auth platform).
+
 <!-- BUILD FLOW 01.08.03 — Open questions -->
 ## Open questions (each is decided in its phase)
 
 | Question | Phase |
 |---|---|
-| Routing: React Router or a small hand-written router (Phase 12 needed none, D-050) | 13 |
+| ~~Routing: React Router or a small hand-written router~~ Decided: hand-written (D-054) | 13 |
 | ~~Product images: self-hosted licensed files or licensed remote URLs~~ Decided: self-hosted (D-051) | 12 |
 | Nginx image: official or unprivileged variant | 14 |
 | How EC2 receives the exact same image: a registry, or `docker save` and `docker load` | 14–15 |

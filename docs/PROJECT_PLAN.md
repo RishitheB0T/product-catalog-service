@@ -125,7 +125,7 @@ MySQL Connector/J release notes; the Testcontainers documentation.
 | Vite | 8.3.5 | Re-checked 2026-10-30: 8.3.4 → 8.3.5, a patch (D-053). Files written by hand after reading the `create-vite` 9.3.3 template; `@vitejs/plugin-react` 6.1.2 | `package.json` (12) |
 | Vitest / jsdom | 5.0.5 / 30.1.3 | Testing Library: react 16.3.3, dom 10.4.2 (required by react), jest-dom 7.0.1, user-event 14.6.8 | `package.json` (12) |
 | oxlint | 1.90.0 | Replaces ESLint: the current Vite template (`create-vite` 9.3.3) lints with oxlint (D-050) | `package.json` (12) |
-| React Router | 8.5.0 | Candidate only. Not needed in Phase 12 (one page, D-050); decided in Phase 13 | (13) |
+| React Router | 8.5.0 | Candidate only. Not adopted: Phase 13 uses a small hand-written router for its five flat pages (D-054) | — |
 | Nginx | 1.30.6 (stable line) | nginx.org stable release; image variant chosen in Phase 14 | Dockerfile (14) |
 | Java runtime image | `eclipse-temurin:21.0.12.1_1-jre-noble` | The build stage uses the matching `-jdk-noble` image | Dockerfile (14) |
 | k6 | 2.3.0 | GitHub's "latest" release. Run from the official `grafana/k6:2.3.0` image | scripts (11) |

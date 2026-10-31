@@ -13,8 +13,9 @@ Runtime role: None. It documents runtime order; it is not executed.
 > **Status:** Flow 0 (health check) has been real since Phase 02. Flows 2, 4, and 5 have been real since Phase 05.
 > Their cache steps arrived in Phases 09 (reads, Flow 3) and 10 (eviction after writes, `WRITE-07`, and the outage
 > handling of Flow 6); the cache is on by default since Phase 10.
-> Flow 1 (search) has been real since Phase 06, and its browser steps since Phase 12. Steps name the real classes,
-> methods, hooks, and components once their phase has landed.
+> Flow 1 (search) has been real since Phase 06, and its browser steps since Phase 12; the browser steps of reads and
+> writes (`READ-01`, `WRITE-01`, `WRITE-08`) since Phase 13. Steps name the real classes, methods, hooks, and
+> components once their phase has landed.
 
 Step IDs describe **runtime order**, not file-creation order (see "Two numbering systems" in `BUILD_GUIDE.md`).
 
@@ -72,14 +73,14 @@ Example: `GET /api/v1/products/42`
 
 | Step | Where | What happens | Phase |
 |---|---|---|---|
-| READ-01 | Client (the detail page from Phase 13) | Sends `GET /api/v1/products/42` | 05 / 13 |
+| READ-01 | Browser: `ProductPage` → `useProduct` → `getProduct` | A card's link (or an address typed in) leads to `/products/42`; `matchRoute` picks the product page, which sends `GET /api/v1/products/42` and aborts it if the shopper leaves first. The edit form (`/admin/products/42/edit`) loads the product the same way | 05 / 13 |
 | READ-02 | `ProductController.getProduct` | Spring converts `{id}` to a `long` (non-numeric → 400) and calls the service | 05 |
 | READ-03 | `ProductService.getProduct` | Since Phase 09 no transaction yet: the service first asks `ProductDetailCache` (when `catalog.cache.enabled` is true) | 05 / 09 |
 | READ-04 | `ProductDetailCache.get` → Redis | `GET catalog:v1:product:42`. Hit → `READ-04H`. Miss → `READ-05` (counted as `miss`). Error → `READ-04X` (counted as `error`, logged) | 09 / 10 |
 | READ-05 | `ProductRepository.findById` → MySQL | In a read-only transaction that covers only this read and `READ-06`: `SELECT … FROM product WHERE id = 42`. No row → `ProductNotFoundException` → 404 `product-not-found`, and nothing is cached | 05 / 09 |
 | READ-06 | `ProductMapper.toResponse` | Entity → `ProductResponse` inside the transaction, which then ends | 05 |
 | READ-07 | `ProductDetailCache.put` → Redis | After the transaction: `SET catalog:v1:product:42 <json>` with a 60-second TTL. A failure is logged and counted; the response is unaffected | 09 |
-| READ-08 | Controller → client | `200 OK` with JSON | 05 |
+| READ-08 | Controller → client | `200 OK` with JSON. In the browser, `ProductPage` shows the photo and the facts; a 404 shows "This product doesn't exist" with a link to the catalog | 05 / 13 |
 
 ## Flow 3 — Product detail, cache hit
 
@@ -101,14 +102,14 @@ Example: `PUT /api/v1/products/42`
 
 | Step | Where | What happens | Phase |
 |---|---|---|---|
-| WRITE-01 | Client (the local admin from Phase 13) | Sends the complete product plus the `version` it last read | 05 / 13 |
+| WRITE-01 | Browser: `ProductFormPage` → `updateProduct` | Shown only when `GET /api/v1/settings` says writes are on. The form checks every field with the API's own rules (`validateProduct`); if anything is wrong, nothing is sent and focus moves to the error summary. Otherwise it sends the complete product plus the `version` it loaded. (Create sends `POST` without a version; delete sends `DELETE` after a confirmation dialog) | 05 / 13 |
 | WRITE-02 | Spring MVC: Jackson and Bean Validation | Reads the JSON into `ProductUpdateRequest` and checks it (`@Valid`). Unreadable → 400 `malformed-request`; invalid → 400 `validation-failed`. The service is never called | 05 |
 | WRITE-03 | `ProductController.updateProduct` | Calls the service | 05 |
 | WRITE-04 | `ProductService.updateProduct` | The proxy begins a transaction. `requireWritesEnabled` refuses the request with 403 `writes-disabled` when `catalog.writes-enabled` is false; nothing is written | 05 |
 | WRITE-05 | `ProductRepository.findById` → MySQL | Loads row 42 (missing → 404). The request's version must equal the stored one (otherwise 409 `version-conflict`). `ProductMapper.applyUpdate` copies the new values | 05 |
 | WRITE-06 | `saveAndFlush` → MySQL, then commit | Hibernate sends `UPDATE … SET …, version = 8 WHERE id = 42 AND version = 7`. No matching row (a concurrent change) → 409 `version-conflict`; another product's SKU → 409 `duplicate-sku`. Otherwise the method returns and the transaction commits | 05 |
 | WRITE-07 | `ProductCacheEvictionListener` → `ProductDetailCache.evict` → Redis | The service published `ProductChangedEvent(42)` inside the transaction; only after the commit does Spring call the listener, which deletes `catalog:v1:product:42` (for create, the generated id). If that fails, it is logged and counted, and the committed write is still reported as a success | 10 |
-| WRITE-08 | Controller → client | `200 OK` with the new state (update), `201 Created` with `Location` (create), or `204 No Content` (delete) | 05 |
+| WRITE-08 | Controller → client | `200 OK` with the new state (update), `201 Created` with `Location` (create), or `204 No Content` (delete). In the browser: the remembered search results are cleared, and the admin list shows "Saved …" or "Deleted …". A 400 is shown next to the fields it names, a 409 `duplicate-sku` on the SKU field, a 409 `version-conflict` as an explanation with "Load the latest version", and a 403 as "Changes are turned off" | 05 / 13 |
 
 Note on the order: request validation (`WRITE-02`) happens before the write switch (`WRITE-04`), so an invalid
 request to a read-only deployment receives 400, not 403.

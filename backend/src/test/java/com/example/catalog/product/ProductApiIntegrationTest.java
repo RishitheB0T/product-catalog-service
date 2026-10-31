@@ -137,6 +137,15 @@ class ProductApiIntegrationTest {
             assertThat(url.getPort()).isEqualTo(port);
         }
 
+        // Since Phase 13 the storefront asks the server whether to offer its admin area.
+        @Test
+        void theSettingsTellTheStorefrontThatWritesAreAllowed() {
+            client.get().uri("/api/v1/settings")
+                    .exchange()
+                    .expectStatus().isOk()
+                    .expectBody().jsonPath("$.writesEnabled").isEqualTo(true);
+        }
+
         @Test
         void aProductLivesThroughCreateReadUpdateAndDelete() {
             String sku = sku("LIFE");
@@ -472,6 +481,14 @@ class ProductApiIntegrationTest {
             assertThat(repository.count()).isEqualTo(rowsBefore);
             assertThat(read(client, existing.getId())).isEqualTo(current);
             assertThat(idsFound(client, "Read-only Vase")).contains(existing.getId());
+        }
+
+        @Test
+        void theSettingsTellTheStorefrontThatWritesAreOff() {
+            client.get().uri("/api/v1/settings")
+                    .exchange()
+                    .expectStatus().isOk()
+                    .expectBody().jsonPath("$.writesEnabled").isEqualTo(false);
         }
 
         @Test

@@ -14,7 +14,7 @@ A product catalog built from an empty folder in documented phases, with every fi
 **Spring Boot** REST API over **MySQL**, **Redis** caching for product details, and a **React** storefront that
 uses the real API.
 
-> **Status: Phase 12 of 16 complete.**
+> **Status: Phase 13 of 16 complete.**
 > - **The API** searches the catalog (filters, sorting, pagination) and reads, creates, updates, and deletes single
 >   products, with validation, optimistic locking, and one error format. Production settings are read-only.
 > - **Performance:** search queries were measured on 100,000 products and indexed from the measured plans. Product
@@ -22,8 +22,10 @@ uses the real API.
 >   Load tests with k6 measured whole requests: the cache serves product details about 3.3 times faster than MySQL
 >   alone.
 > - **The storefront** (React) searches the real API, with filters, chips, sorting, pagination, and the search kept
->   in the address bar.
-> - **Tests:** 108 backend tests, including full-stack tests over real HTTP and a Redis outage, and 17 frontend
+>   in the address bar. Each product has its own page.
+> - **The admin:** a local admin (`/admin`) adds, edits, and deletes products. It appears only when the server allows
+>   writes, and the server refuses them itself when it doesn't.
+> - **Tests:** 110 backend tests, including full-stack tests over real HTTP and a Redis outage, and 39 frontend
 >   tests.
 >
 > This README always describes what actually works; anything not built yet is labeled *planned*.
@@ -45,7 +47,7 @@ uses the real API.
 | Cache eviction after committed writes, 200 ms Redis timeouts with MySQL fallback; cache switched on | Done (Phase 10) |
 | Reproducible k6 benchmarks: cache off, cold, and warm; search without and with indexes; raw results and report | Done (Phase 11) |
 | React storefront: search, categories, filters (sidebar or mobile drawer), chips, sorting, pagination, the search in the address bar, INR prices, licensed photos | Done (Phase 12) |
-| Product detail view, local admin, accessibility polish | Planned (Phase 13) |
+| Product pages; local admin (add, edit, delete with confirmation, version conflicts explained) shown only when writes are allowed; keyboard and screen-reader polish | Done (Phase 13) |
 | Production containers and CI | Planned (Phase 14) |
 | AWS EC2 deployment | Planned (Phase 15; needs AWS access and approval) |
 
@@ -180,7 +182,8 @@ npm ci
 npm run dev
 ```
 
-Open http://127.0.0.1:24173/. `npm ci` installs the exact versions recorded in `package-lock.json` (run it again
+Open http://127.0.0.1:24173/. With the `dev` profile, writes are allowed, so the header shows **Admin**
+(http://127.0.0.1:24173/admin) for adding, editing, and deleting products. `npm ci` installs the exact versions recorded in `package-lock.json` (run it again
 whenever that file changes). The Vite server forwards every `/api` request to the backend on port 24081, so the page
 and the API share one address. Stop it with Ctrl+C.
 
@@ -226,6 +229,7 @@ Base path `/api/v1/products`, JSON in and out. Ready-to-send examples for VS Cod
 | `POST /api/v1/products` | 201 with the product and a `Location` header | 400 invalid fields or JSON; 409 duplicate SKU; 403 read-only |
 | `PUT /api/v1/products/{id}` | 200 with the product (version + 1) | 400; 404; 409 duplicate SKU or outdated version; 403 |
 | `DELETE /api/v1/products/{id}` | 204 | 404; 409 changed meanwhile; 403 |
+| `GET /api/v1/settings` | 200 with `{"writesEnabled": true}` or `false` (since Phase 13; the storefront shows its admin only when `true`) | — |
 
 **Search.** Every parameter is optional, and all filters that are sent must match.
 
@@ -312,9 +316,9 @@ cd backend
 .\mvnw.cmd verify
 ```
 
-108 tests in fourteen classes. The first two start the whole application on a random port and call it over real HTTP,
+110 tests in fourteen classes. The first two start the whole application on a random port and call it over real HTTP,
 exactly as a client would:
-- `ProductApiIntegrationTest` (15): a product from creation to deletion, the exact JSON shape, fields a client may not
+- `ProductApiIntegrationTest` (17): the settings in both modes, a product from creation to deletion, the exact JSON shape, fields a client may not
   set, every error type (400, 404, 405, 409, 415), a rollback seen through the API, Unicode text, ten simultaneous
   updates of the same version (exactly one 200, nine 409s), ten simultaneous creates with one SKU (one 201, nine
   409s), and the read-only `prod` profile.
@@ -352,8 +356,8 @@ cd frontend
 npm test
 ```
 
-17 tests in two files:
-- **`App.test.jsx` (8)** renders the whole catalog page against a fake API. It covers:
+39 tests in six files. The page tests render the whole app against a fake backend (`src/test/fakeApi.js`):
+- **`App.test.jsx` (8)** covers the catalog page:
   - the results and their count;
   - a search restored from the address bar;
   - typing that sends one request after the pause;
@@ -362,10 +366,26 @@ npm test
   - removing chips and clearing all filters;
   - an API error explained in plain words, with "Try again";
   - the placeholder when a photo fails to load.
-- **`catalog.test.js` (9)** checks the pure rules: reading and writing the address bar, the API query, price
-  checks, page numbers, and rupee formatting.
+- **`ProductPage.test.jsx` (4)** covers the product page:
+  - its facts and title;
+  - a missing product;
+  - from a card to the page and back to the same results;
+  - the edit link only when writes are allowed.
+- **`AdminPages.test.jsx` (7)** covers the admin:
+  - a read-only server;
+  - the list;
+  - every problem listed before anything is sent;
+  - a valid product saved;
+  - a duplicate SKU shown on its field;
+  - a version conflict with "Load the latest version";
+  - a delete only after confirming.
+- **Unit tests:** `catalog.test.js` (9), `productForm.test.js` (6), and `routes.test.jsx` (5) check the pure rules:
+  - the address bar, the API query, prices, pages, and rupees;
+  - the form's checks and request body;
+  - which page each path shows, and which clicks a link keeps in the app.
 
-The pages were also checked in a real browser at 375, 768, and 1440 pixels wide (`docs/BUILD_GUIDE.md`, Phase 12).
+The pages were also checked in a real browser at 375, 768, and 1440 pixels wide (`docs/BUILD_GUIDE.md`, Phases 12
+and 13), including a full add-edit-delete cycle, keyboard-only paths, and a read-only server.
 
 ## Performance evidence
 

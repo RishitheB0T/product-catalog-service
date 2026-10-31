@@ -33,6 +33,12 @@ export function categoryLabel(value) {
   return CATEGORIES.find((category) => category.value === value)?.label ?? value
 }
 
+// The placeholder's monogram: the first letters of the first two words ("Oak Table Lamp" gives "OT"). Moved here
+// from ProductCard in Phase 13, because the product page shows the same placeholder.
+export function monogram(name) {
+  return name.split(/\s+/).slice(0, 2).map((word) => word[0]).join('').toUpperCase()
+}
+
 // BUILD FLOW 12.10.02 — The search state and the address bar
 // The address bar is the single source of truth for what is shown, so a refresh or a shared link restores it exactly.
 // readSearchState accepts any query string, including a hand-edited one: unknown or malformed values fall back to

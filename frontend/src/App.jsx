@@ -1,117 +1,85 @@
 // BUILD FLOW 12.29 — frontend/src/App.jsx
 // First introduced: Phase 12
-// Purpose: The catalog page. It connects the search state in the address bar (useUrlState) to the API request
-//          (useProductSearch), and arranges the header, hero, categories, filters, results, and footer.
-// Depends on: The hooks 12.13–12.15, catalog.js (12.10), and the components 12.16–12.28.
+// Purpose: The storefront's frame and router: the header, the page for the current address, and the footer. Since
+//          Phase 13 it chooses among the catalog, a product page, the admin pages, and "not found"; the catalog itself
+//          moved to CatalogPage (13.07).
+// Depends on: useUrlState and navigate (12.13), matchRoute and paths (13.02), useSettings (13.04), catalog.js (12.10),
+//             the pages 13.07–13.11, SiteHeader (12.16), SearchBox (12.18), SiteFooter (12.28).
 // Used by: main.jsx (12.07).
-// Runtime role: Re-renders whenever the search state or the latest response changes.
+// Runtime role: Re-renders whenever the address or the server's settings change.
 
-import { useState } from 'react'
-import ActiveFilters from './components/ActiveFilters.jsx'
-import CategoryTabs from './components/CategoryTabs.jsx'
-import FilterDrawer from './components/FilterDrawer.jsx'
-import FilterPanel from './components/FilterPanel.jsx'
-import Hero from './components/Hero.jsx'
-import Pagination from './components/Pagination.jsx'
-import ProductGrid from './components/ProductGrid.jsx'
-import ResultsToolbar from './components/ResultsToolbar.jsx'
+import { useRef } from 'react'
 import SearchBox from './components/SearchBox.jsx'
 import SiteFooter from './components/SiteFooter.jsx'
 import SiteHeader from './components/SiteHeader.jsx'
-import { EmptyState, ErrorState, GridSkeleton } from './components/StatusViews.jsx'
-import { useProductSearch } from './hooks/useProductSearch.js'
-import { useUrlState } from './hooks/useUrlState.js'
-import { DEFAULT_STATE, PAGE_SIZE, formatCount, hasFilters, toApiQuery } from './lib/catalog.js'
-
-// BUILD FLOW 12.29.01 — The count above the grid, from the server's numbers
-function summarize(data) {
-  if (!data) return 'Loading products…'
-  const total = data.totalElements
-  if (total === 0) return 'No products found'
-  const noun = total === 1 ? 'product' : 'products'
-  if (data.content.length === 0) return `${formatCount(total)} ${noun}`
-  const first = data.page * data.size + 1
-  const last = first + data.content.length - 1
-  return `Showing ${formatCount(first)}–${formatCount(last)} of ${formatCount(total)} ${noun}`
-}
+import { useSettings } from './hooks/useSettings.js'
+import { navigate, useNavigationEffects, useUrlState } from './hooks/useUrlState.js'
+import { DEFAULT_STATE, readSearchState, writeSearchState } from './lib/catalog.js'
+import { matchRoute, paths } from './lib/routes.js'
+import AdminPage from './pages/AdminPage.jsx'
+import CatalogPage from './pages/CatalogPage.jsx'
+import NotFoundPage from './pages/NotFoundPage.jsx'
+import ProductFormPage from './pages/ProductFormPage.jsx'
+import ProductPage from './pages/ProductPage.jsx'
 
 export default function App() {
-  // BUILD FLOW 12.29.02 — State: one source of truth, everything else derived
-  // The search lives in the address bar (useUrlState). The API query is computed from it on every render, and the
-  // request follows the query (useProductSearch). The only other state here is whether the drawer is open: nothing
-  // is copied into a second state that could drift out of step.
-  const [search, update] = useUrlState()
-  const { loading, data, error, retry } = useProductSearch(toApiQuery(search))
-  const [drawerOpen, setDrawerOpen] = useState(false)
-  const filtersActive = hasFilters(search)
-
-  const clearAll = () => update({
-    q: DEFAULT_STATE.q, category: DEFAULT_STATE.category, minPrice: DEFAULT_STATE.minPrice,
-    maxPrice: DEFAULT_STATE.maxPrice, inStock: DEFAULT_STATE.inStock,
-  })
-
-  // A new page starts at the top of the results, not at the pagination where the click happened.
-  const goToPage = (page) => {
-    update({ page })
-    const motion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'
-    document.getElementById('results')?.scrollIntoView?.({ behavior: motion, block: 'start' })
+  // BUILD FLOW 12.29.01 — Everything follows from the address
+  // The path picks the page (matchRoute); the query string is the search, read fresh on every render. Changing the
+  // search means writing a new address: every change except a page change returns to page 1, and typing replaces the
+  // current history entry instead of adding one (12.13.02).
+  const { pathname, search } = useUrlState()
+  const route = matchRoute(pathname)
+  const searchState = readSearchState(search)
+  const update = (changes, { replace = false } = {}) => {
+    const next = { ...searchState, ...changes }
+    if (!('page' in changes)) next.page = 1
+    navigate(`${pathname}${writeSearchState(next)}`, { replace })
   }
 
-  // BUILD FLOW 12.29.03 — Choosing what the results area shows
-  // An error wins; then the skeleton until the first answer; then an empty state or the grid. While a newer request
-  // is loading, whatever is shown stays visible: the wrapper's aria-busy tells screen readers that it is being
-  // updated, and CSS dims it.
-  let results
-  if (error) results = <ErrorState message={error.message} onRetry={retry} />
-  else if (!data) results = <GridSkeleton count={PAGE_SIZE} />
-  else if (data.content.length === 0) {
-    results = (
-      <EmptyState
-        pastTheEnd={data.totalElements > 0}
-        filtersActive={filtersActive}
-        onFirstPage={() => goToPage(1)}
-        onClearAll={clearAll}
-      />
-    )
-  } else results = <ProductGrid products={data.content} />
+  const settings = useSettings()
+  const writesEnabled = settings?.writesEnabled === true
+  const mainRef = useRef(null)
+  useNavigationEffects(mainRef)
 
+  // BUILD FLOW 12.29.02 — One search box for every page
+  // On the catalog it refines the current search; anywhere else it starts a new search on the catalog.
+  const onSearch = (q, options) => {
+    if (route.page === 'catalog') update({ q }, options)
+    else navigate(`${paths.catalog}${writeSearchState({ ...DEFAULT_STATE, q })}`)
+  }
+
+  // BUILD FLOW 12.29.03 — The page for this address
+  let page
+  switch (route.page) {
+    case 'catalog':
+      page = <CatalogPage search={searchState} update={update} />
+      break
+    case 'product':
+      page = <ProductPage key={route.id} id={route.id} writesEnabled={writesEnabled} />
+      break
+    case 'admin':
+      page = settings && <AdminPage search={searchState} update={update} writesEnabled={writesEnabled} />
+      break
+    case 'new-product':
+      page = settings && <ProductFormPage writesEnabled={writesEnabled} />
+      break
+    case 'edit-product':
+      page = settings && <ProductFormPage key={route.id} id={route.id} writesEnabled={writesEnabled} />
+      break
+    default:
+      page = <NotFoundPage />
+  }
+
+  // BUILD FLOW 12.29.04 — The frame
+  // The skip link jumps past the header to <main>, which can take focus (tabIndex -1) so that a page change can move
+  // focus there (12.13.03). The admin pages wait for the settings, so they never flash a form the server would refuse.
   return (
     <>
-      <a className="skip-link" href="#results">Skip to products</a>
-      <SiteHeader>
-        <SearchBox value={search.q} onSearch={(q, options) => update({ q }, options)} />
+      <a className="skip-link" href="#main">Skip to main content</a>
+      <SiteHeader writesEnabled={writesEnabled}>
+        <SearchBox value={route.page === 'catalog' ? searchState.q : ''} onSearch={onSearch} />
       </SiteHeader>
-
-      <main className="page">
-        <Hero />
-        <CategoryTabs value={search.category} onChange={(category) => update({ category })} />
-
-        <div className="catalog">
-          <aside className="catalog__filters" aria-labelledby="filters-title">
-            <h2 id="filters-title" className="catalog__filters-title">Filters</h2>
-            <FilterPanel idPrefix="sidebar" state={search} onChange={update} />
-          </aside>
-
-          <section id="results" className="catalog__results" aria-labelledby="results-title" tabIndex={-1}>
-            <h2 id="results-title" className="visually-hidden">Products</h2>
-            <ResultsToolbar
-              summary={summarize(data)}
-              sort={search.sort}
-              onSort={(sort) => update({ sort })}
-              onOpenFilters={() => setDrawerOpen(true)}
-              drawerFilterCount={[search.minPrice || search.maxPrice, search.inStock].filter(Boolean).length}
-            />
-            <ActiveFilters state={search} onRemove={update} onClearAll={clearAll} />
-            <div className="results" aria-busy={loading}>{results}</div>
-            {data && !error && <Pagination page={search.page} totalPages={data.totalPages} onPage={goToPage} />}
-          </section>
-        </div>
-      </main>
-
-      <FilterDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} resultCount={data?.totalElements}>
-        <FilterPanel idPrefix="drawer" state={search} onChange={update} />
-      </FilterDrawer>
-
+      <main id="main" ref={mainRef} className="page" tabIndex={-1}>{page}</main>
       <SiteFooter />
     </>
   )
